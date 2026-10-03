@@ -16,6 +16,10 @@ class NoteCard extends ConsumerStatefulWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onActionCompleted;
+  final bool isSelectionMode;
+  final bool isChecked;
+  final ValueChanged<bool?>? onCheckedChanged;
+  final VoidCallback? onLongPress;
 
   const NoteCard({
     super.key,
@@ -23,6 +27,10 @@ class NoteCard extends ConsumerStatefulWidget {
     required this.selected,
     required this.onTap,
     this.onActionCompleted,
+    this.isSelectionMode = false,
+    this.isChecked = false,
+    this.onCheckedChanged,
+    this.onLongPress,
   });
 
   @override
@@ -118,22 +126,26 @@ class _NoteCardState extends ConsumerState<NoteCard> {
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
-            color: widget.selected
-                ? colors.noteCardSelected
-                : (_isHovered
-                    ? (isDark ? colors.surface2.withOpacity(0.5) : colors.surface2.withOpacity(0.7))
-                    : Colors.transparent),
-            gradient: widget.selected ? colors.prismGradient : null,
+            color: widget.isChecked
+                ? colors.primary.withOpacity(isDark ? 0.22 : 0.12)
+                : (widget.selected
+                    ? colors.noteCardSelected
+                    : (_isHovered
+                        ? (isDark ? colors.surface2.withOpacity(0.5) : colors.surface2.withOpacity(0.7))
+                        : Colors.transparent)),
+            gradient: widget.isChecked ? null : (widget.selected ? colors.prismGradient : null),
             borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
             border: Border.all(
-              color: widget.selected
-                  ? colors.primary.withOpacity(0.4)
-                  : (_isHovered
-                      ? colors.border.withOpacity(0.7)
-                      : Colors.transparent),
-              width: 1.0,
+              color: widget.isChecked
+                  ? colors.primary.withOpacity(0.8)
+                  : (widget.selected
+                      ? colors.primary.withOpacity(0.4)
+                      : (_isHovered
+                          ? colors.border.withOpacity(0.7)
+                          : Colors.transparent)),
+              width: widget.isChecked ? 1.5 : 1.0,
             ),
-            boxShadow: widget.selected
+            boxShadow: (widget.selected || widget.isChecked)
                 ? [
                     BoxShadow(
                       color: colors.primary.withOpacity(0.08),
@@ -144,7 +156,10 @@ class _NoteCardState extends ConsumerState<NoteCard> {
                 : null,
           ),
           child: InkWell(
-            onTap: widget.onTap,
+            onTap: widget.isSelectionMode
+                ? () => widget.onCheckedChanged?.call(!widget.isChecked)
+                : widget.onTap,
+            onLongPress: widget.onLongPress,
             borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -154,8 +169,34 @@ class _NoteCardState extends ConsumerState<NoteCard> {
                   // Title & Action Row
                   Row(
                     children: [
+                      // Selection checkbox in selection mode
+                      if (widget.isSelectionMode)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: Checkbox(
+                              value: widget.isChecked,
+                              activeColor: colors.primary,
+                              checkColor: Colors.white,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              side: BorderSide(
+                                color: widget.isChecked
+                                    ? colors.primary
+                                    : colors.textTertiary.withOpacity(0.6),
+                                width: 1.5,
+                              ),
+                              onChanged: widget.onCheckedChanged,
+                            ),
+                          ),
+                        ),
+
                       // Active indicator bar
-                      if (widget.selected)
+                      if (widget.selected && !widget.isSelectionMode)
                         Container(
                           width: 3.5,
                           height: 14,
@@ -170,10 +211,14 @@ class _NoteCardState extends ConsumerState<NoteCard> {
                           widget.note.title.trim().isEmpty ? 'Untitled Document' : widget.note.title,
                           style: TextStyle(
                             fontSize: 13,
-                            fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight: (widget.selected || widget.isChecked)
+                                ? FontWeight.w700
+                                : FontWeight.w600,
                             color: widget.note.title.trim().isEmpty
                                 ? colors.textTertiary
-                                : (widget.selected ? colors.primary : colors.textPrimary),
+                                : ((widget.selected || widget.isChecked)
+                                    ? colors.primary
+                                    : colors.textPrimary),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -185,8 +230,9 @@ class _NoteCardState extends ConsumerState<NoteCard> {
                           padding: EdgeInsets.only(right: 2),
                           child: Icon(Icons.star_rounded, size: 14, color: Color(0xFFF59E0B)),
                         ),
-                      // Options popup menu
-                      _buildCardMenu(context, repo, colors),
+                      // Options popup menu (hidden in bulk selection mode)
+                      if (!widget.isSelectionMode)
+                        _buildCardMenu(context, repo, colors),
                     ],
                   ),
                   const SizedBox(height: 3),

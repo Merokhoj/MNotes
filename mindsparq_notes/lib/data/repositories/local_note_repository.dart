@@ -249,6 +249,61 @@ class LocalNoteRepository implements NoteRepository {
     });
   }
 
+  // Alias for backward compatibility
+  Future<void> deletePermanently(String id) => deleteNotePermanently(id);
+
+  @override
+  Future<void> moveNoteToFolder(String noteId, String? folderId) async {
+    await (_db.update(_db.notes)..where((t) => t.id.equals(noteId))).write(
+      NotesCompanion(
+        folderId: Value(folderId),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> batchMoveToTrash(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await (_db.update(_db.notes)..where((t) => t.id.isIn(ids))).write(
+      NotesCompanion(
+        isTrashed: const Value(true),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> batchRestoreFromTrash(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await (_db.update(_db.notes)..where((t) => t.id.isIn(ids))).write(
+      NotesCompanion(
+        isTrashed: const Value(false),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> batchDeletePermanently(List<String> ids) async {
+    if (ids.isEmpty) return;
+    await _db.transaction(() async {
+      await (_db.delete(_db.noteTags)..where((t) => t.noteId.isIn(ids))).go();
+      await (_db.delete(_db.notes)..where((t) => t.id.isIn(ids))).go();
+    });
+  }
+
+  @override
+  Future<void> batchMoveNoteToFolder(List<String> ids, String? folderId) async {
+    if (ids.isEmpty) return;
+    await (_db.update(_db.notes)..where((t) => t.id.isIn(ids))).write(
+      NotesCompanion(
+        folderId: Value(folderId),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
   // ── Folders ───────────────────────────────────────────────────────────────
 
   @override

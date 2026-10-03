@@ -19,6 +19,11 @@ abstract class NoteRepository {
   Future<void> moveToTrash(String id);
   Future<void> restoreFromTrash(String id);
   Future<void> deleteNotePermanently(String id);
+  Future<void> moveNoteToFolder(String noteId, String? folderId);
+  Future<void> batchMoveToTrash(List<String> ids);
+  Future<void> batchRestoreFromTrash(List<String> ids);
+  Future<void> batchDeletePermanently(List<String> ids);
+  Future<void> batchMoveNoteToFolder(List<String> ids, String? folderId);
   
   // Folders
   Stream<List<Folder>> watchAllFolders();
