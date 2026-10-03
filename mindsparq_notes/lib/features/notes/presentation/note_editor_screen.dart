@@ -25,6 +25,8 @@ import '../../../domain/models/note.dart';
 import 'dialogs/add_tag_dialog.dart';
 import 'services/markdown_paste_service.dart';
 import 'widgets/editor_context_menu.dart';
+import 'widgets/custom_image_block.dart';
+import 'widgets/insert_table_dialog.dart';
 
 class NoteEditorScreen extends ConsumerStatefulWidget {
   final String noteId;
@@ -39,6 +41,7 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
   String? _lastLoadedNoteId;
   bool _isResearchOpen = false;
   ResearchTab _researchTab = ResearchTab.aiAssistant;
+  bool _isHeaderCollapsed = false;
 
   @override
   void initState() {
@@ -109,6 +112,33 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
     }
   }
 
+  void _handleInsertTable(EditorState editorState) async {
+    final result = await InsertTableDialog.show(context);
+    if (result != null && mounted) {
+      final doc = editorState.document;
+      final selection = editorState.selection;
+      final int targetIndex = (selection != null && selection.end.path.isNotEmpty)
+          ? selection.end.path[0] + 1
+          : doc.root.children.length;
+
+      final tableNode = TableNode.fromList(
+        List.generate(result.cols, (_) => List.generate(result.rows, (_) => '')),
+      ).node;
+
+      final transaction = editorState.transaction;
+      transaction.insertNode([targetIndex], tableNode);
+      editorState.apply(transaction);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Inserted ${result.cols}×${result.rows} table'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   void _handleOpenExport(NoteEditorState editorData) {
     showDialog(
       context: context,
@@ -144,6 +174,16 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
             control: true, shift: true): () {
           setState(() => _isResearchOpen = !_isResearchOpen);
         },
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
+          editorStateAsync.valueOrNull?.editorState.undoManager.undo();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () {
+          editorStateAsync.valueOrNull?.editorState.undoManager.redo();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyZ,
+            control: true, shift: true): () {
+          editorStateAsync.valueOrNull?.editorState.undoManager.redo();
+        },
       },
       child: Focus(
         autofocus: true,
@@ -174,8 +214,149 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                   child: LayoutBuilder(
                     builder: (context, headerConstraints) {
                       final isCompact = headerConstraints.maxWidth < 900;
-                      final isNarrow = headerConstraints.maxWidth < 740;
                       final isUltraCompact = headerConstraints.maxWidth < 560;
+                      final isMinimal = headerConstraints.maxWidth < 400;
+
+                      if (isMinimal) {
+                        return Row(
+                          children: [
+                            Icon(PhosphorIcons.folder(PhosphorIconsStyle.regular),
+                                size: 15, color: colors.textTertiary),
+                            const SizedBox(width: AppSpacing.xs),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                                child: Text(
+                                  editorData.note.title.isEmpty
+                                      ? 'Untitled Document'
+                                      : editorData.note.title,
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.textPrimary),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            // Compact auto-save indicator icon
+                            Icon(
+                              editorData.isSaving
+                                  ? Icons.sync_rounded
+                                  : Icons.cloud_done_rounded,
+                              size: 14,
+                              color: editorData.isSaving
+                                  ? const Color(0xFFF59E0B)
+                                  : AppColors.success,
+                            ),
+                            const SizedBox(width: 2),
+                            // Overflow menu for narrow widths
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert_rounded,
+                                  size: 18, color: colors.textSecondary),
+                              tooltip: 'Actions',
+                              color: colors.surface,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppSpacing.radiusMd),
+                                side: BorderSide(
+                                    color: colors.border.withOpacity(0.4)),
+                              ),
+                              onSelected: (val) {
+                                if (val == 'ai') {
+                                  setState(() {
+                                    _isResearchOpen = true;
+                                    _researchTab = ResearchTab.aiAssistant;
+                                  });
+                                } else if (val == 'research') {
+                                  setState(() {
+                                    _isResearchOpen = true;
+                                    _researchTab = ResearchTab.citations;
+                                  });
+                                } else if (val == 'attach') {
+                                  setState(() => _isResearchOpen = true);
+                                } else if (val == 'favorite') {
+                                  ref
+                                      .read(noteEditorControllerProvider(
+                                              widget.noteId)
+                                          .notifier)
+                                      .toggleFavorite();
+                                } else if (val == 'export') {
+                                  _handleOpenExport(editorData);
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                const PopupMenuItem(
+                                  value: 'ai',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.auto_awesome_rounded,
+                                          size: 16, color: AppColors.accent),
+                                      SizedBox(width: 8),
+                                      Text('AI Assistant'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'research',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.science_rounded,
+                                          size: 16, color: colors.primary),
+                                      const SizedBox(width: 8),
+                                      const Text('Research Mode'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'attach',
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.paperclip(),
+                                          size: 16, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      Text('Attachments ($attachmentCount)'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'favorite',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        editorData.note.isFavorite
+                                            ? Icons.star_rounded
+                                            : Icons.star_border_rounded,
+                                        size: 16,
+                                        color: editorData.note.isFavorite
+                                            ? const Color(0xFFF59E0B)
+                                            : colors.textTertiary,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(editorData.note.isFavorite
+                                          ? 'Unfavorite'
+                                          : 'Add to Favorites'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'export',
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.export(),
+                                          size: 16, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      const Text('Export Document'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                      }
 
                       return Row(
                         children: [
@@ -217,52 +398,6 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                           ),
                           const SizedBox(width: AppSpacing.sm),
 
-                          // Word Count & Reading Time Pill
-                          if (!isUltraCompact)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3.5),
-                              decoration: BoxDecoration(
-                                color: colors.surface2,
-                                borderRadius:
-                                    BorderRadius.circular(AppSpacing.radiusFull),
-                                border: Border.all(
-                                    color: colors.border.withOpacity(0.6)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    isNarrow
-                                        ? '${editorData.wordCount}w'
-                                        : '${editorData.wordCount} words',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: colors.textSecondary,
-                                        fontWeight: FontWeight.w500),
-                                  ),
-                                  if (!isCompact) ...[
-                                    const SizedBox(width: 5),
-                                    Container(
-                                        width: 3,
-                                        height: 3,
-                                        decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: colors.textTertiary)),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      '${editorData.readingTimeMinutes} min read',
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: colors.textTertiary),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          if (!isUltraCompact)
-                            const SizedBox(width: AppSpacing.sm),
-
                           // Dynamic Auto-Save Indicator
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
@@ -293,7 +428,7 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                       ? const Color(0xFFF59E0B)
                                       : AppColors.success,
                                 ),
-                                if (!isNarrow) ...[
+                                if (!isUltraCompact) ...[
                                   const SizedBox(width: 4),
                                   Text(
                                     editorData.isSaving ? 'Saving...' : 'Saved',
@@ -613,6 +748,8 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                               note: editorData.note,
                               onInsertImage: () => _handlePickAndInsertImage(
                                   editorData.editorState),
+                              onInsertTable: () => _handleInsertTable(
+                                  editorData.editorState),
                               onToggleResearch: () {
                                 if (_isResearchOpen &&
                                     _researchTab != ResearchTab.aiAssistant) {
@@ -675,7 +812,9 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                     ),
                                     padding: EdgeInsets.fromLTRB(
                                       isMobile ? 18.0 : 52.0,
-                                      isMobile ? 24.0 : 44.0, // More breathing room at the top
+                                      _isHeaderCollapsed
+                                          ? (isMobile ? 12.0 : 16.0)
+                                          : (isMobile ? 24.0 : 44.0),
                                       isMobile ? 18.0 : 52.0,
                                       8.0,
                                     ),
@@ -683,136 +822,289 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        // Title TextField (Prominent 32px Bold)
-                                        TextField(
-                                          controller: _titleController,
-                                          onChanged: (val) {
-                                            ref
-                                                .read(
-                                                    noteEditorControllerProvider(
-                                                            widget.noteId)
-                                                        .notifier)
-                                                .updateTitle(val);
-                                          },
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .displayLarge
-                                              ?.copyWith(
-                                                color: colors.textPrimary,
-                                                fontWeight: FontWeight.w800,
-                                                fontSize: isMobile ? 24 : 32,
-                                                letterSpacing: -0.5,
+                                        // Animated Collapsible Header (Hero Title + Tags vs Compact Bar)
+                                        AnimatedCrossFade(
+                                          duration:
+                                              const Duration(milliseconds: 220),
+                                          crossFadeState: _isHeaderCollapsed
+                                              ? CrossFadeState.showSecond
+                                              : CrossFadeState.showFirst,
+                                          firstChild: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              // Title TextField (Prominent 32px Bold)
+                                              TextField(
+                                                controller: _titleController,
+                                                onChanged: (val) {
+                                                  ref
+                                                      .read(
+                                                          noteEditorControllerProvider(
+                                                                  widget.noteId)
+                                                              .notifier)
+                                                      .updateTitle(val);
+                                                },
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .displayLarge
+                                                    ?.copyWith(
+                                                      color: colors.textPrimary,
+                                                      fontWeight: FontWeight.w800,
+                                                      fontSize:
+                                                          isMobile ? 24 : 32,
+                                                      letterSpacing: -0.5,
+                                                    ),
+                                                decoration: InputDecoration(
+                                                  border: InputBorder.none,
+                                                  enabledBorder: InputBorder.none,
+                                                  focusedBorder: InputBorder.none,
+                                                  errorBorder: InputBorder.none,
+                                                  disabledBorder:
+                                                      InputBorder.none,
+                                                  focusedErrorBorder:
+                                                      InputBorder.none,
+                                                  fillColor: Colors.transparent,
+                                                  filled: false,
+                                                  contentPadding:
+                                                      EdgeInsets.zero,
+                                                  isDense: true,
+                                                  hintText: 'Untitled Document',
+                                                  hintStyle: TextStyle(
+                                                    fontSize: isMobile ? 24 : 32,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: colors.textTertiary
+                                                        .withOpacity(0.35),
+                                                    letterSpacing: -0.5,
+                                                  ),
+                                                ),
+                                                maxLines: 1,
+                                                textInputAction:
+                                                    TextInputAction.next,
                                               ),
-                                          decoration: InputDecoration(
-                                            border: InputBorder.none,
-                                            enabledBorder: InputBorder.none,
-                                            focusedBorder: InputBorder.none,
-                                            errorBorder: InputBorder.none,
-                                            disabledBorder: InputBorder.none,
-                                            focusedErrorBorder: InputBorder.none,
-                                            fillColor: Colors.transparent,
-                                            filled: false,
-                                            contentPadding: EdgeInsets.zero,
-                                            isDense: true,
-                                            hintText: 'Untitled Document',
-                                            hintStyle: TextStyle(
-                                              fontSize: isMobile ? 24 : 32,
-                                              fontWeight: FontWeight.w800,
-                                              color: colors.textTertiary
-                                                  .withOpacity(0.35),
-                                              letterSpacing: -0.5,
-                                            ),
-                                          ),
-                                          maxLines: 1,
-                                          textInputAction: TextInputAction.next,
-                                        ),
 
-                                        const SizedBox(height: 14),
+                                              const SizedBox(height: 14),
 
-                                        // Interactive Neo-Glass Tag Pills Row
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              PhosphorIcons.tag(
-                                                  PhosphorIconsStyle.fill),
-                                              size: 13,
-                                              color: colors.textTertiary,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: SingleChildScrollView(
-                                                scrollDirection:
-                                                    Axis.horizontal,
-                                                physics:
-                                                    const BouncingScrollPhysics(),
-                                                child: Row(
-                                                  children: [
-                                                    ...editorData.note.tags
-                                                        .map((t) {
-                                                      final tagColor = t
-                                                                  .colorValue !=
-                                                              null
-                                                          ? Color(t.colorValue!)
-                                                          : colors.primary;
-                                                      return Padding(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .only(right: 6),
-                                                        child: NeoGlassBadge(
-                                                          label: '#${t.name}',
-                                                          color: tagColor,
-                                                          onDelete: () {
-                                                            ref
-                                                                .read(noteEditorControllerProvider(
-                                                                        widget
-                                                                            .noteId)
-                                                                    .notifier)
-                                                                .removeTag(
-                                                                    t.id);
-                                                          },
-                                                        ),
-                                                      );
-                                                    }),
-
-                                                    // Add Tag Button
-                                                    NeoGlassBadge(
-                                                      label: '+ Tag',
-                                                      color:
-                                                          colors.textSecondary,
-                                                      onTap: () {
-                                                        showDialog(
-                                                          context: context,
-                                                          builder: (ctx) =>
-                                                              AddTagDialog(
-                                                            currentTags:
-                                                                editorData
-                                                                    .note.tags,
-                                                            onTagSelected:
-                                                                (tag) {
-                                                              ref
-                                                                  .read(noteEditorControllerProvider(
-                                                                          widget
+                                              // Interactive Neo-Glass Tag Pills Row
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    PhosphorIcons.tag(
+                                                        PhosphorIconsStyle.fill),
+                                                    size: 13,
+                                                    color: colors.textTertiary,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child:
+                                                        SingleChildScrollView(
+                                                      scrollDirection:
+                                                          Axis.horizontal,
+                                                      physics:
+                                                          const BouncingScrollPhysics(),
+                                                      child: Row(
+                                                        children: [
+                                                          ...editorData
+                                                              .note.tags
+                                                              .map((t) {
+                                                            final tagColor = t
+                                                                        .colorValue !=
+                                                                    null
+                                                                ? Color(t
+                                                                    .colorValue!)
+                                                                : colors.primary;
+                                                            return Padding(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      right: 6),
+                                                              child:
+                                                                  NeoGlassBadge(
+                                                                label:
+                                                                    '#${t.name}',
+                                                                color: tagColor,
+                                                                onDelete: () {
+                                                                  ref
+                                                                      .read(noteEditorControllerProvider(widget
                                                                               .noteId)
-                                                                      .notifier)
-                                                                  .addTag(tag);
+                                                                          .notifier)
+                                                                      .removeTag(
+                                                                          t.id);
+                                                                },
+                                                              ),
+                                                            );
+                                                          }),
+
+                                                          // Add Tag Button
+                                                          NeoGlassBadge(
+                                                            label: '+ Tag',
+                                                            color: colors
+                                                                .textSecondary,
+                                                            onTap: () {
+                                                              showDialog(
+                                                                context:
+                                                                    context,
+                                                                builder: (ctx) =>
+                                                                    AddTagDialog(
+                                                                  currentTags:
+                                                                      editorData
+                                                                          .note
+                                                                          .tags,
+                                                                  onTagSelected:
+                                                                      (tag) {
+                                                                    ref
+                                                                        .read(noteEditorControllerProvider(widget
+                                                                                .noteId)
+                                                                            .notifier)
+                                                                        .addTag(
+                                                                            tag);
+                                                                  },
+                                                                ),
+                                                              );
                                                             },
                                                           ),
-                                                        );
-                                                      },
+                                                        ],
+                                                      ),
                                                     ),
-                                                  ],
-                                                ),
+                                                  ),
+                                                ],
+                                              ),
+
+                                              const SizedBox(height: 16),
+                                              Divider(
+                                                  color: colors.border
+                                                      .withOpacity(0.3),
+                                                  height: 1),
+                                              const SizedBox(height: 12),
+                                            ],
+                                          ),
+                                          secondChild: Container(
+                                            padding: const EdgeInsets.only(
+                                                bottom: 8),
+                                            margin: const EdgeInsets.only(
+                                                bottom: 6),
+                                            decoration: BoxDecoration(
+                                              border: Border(
+                                                bottom: BorderSide(
+                                                    color: colors.border
+                                                        .withOpacity(0.25)),
                                               ),
                                             ),
-                                          ],
+                                            child: Row(
+                                              children: [
+                                                Expanded(
+                                                  child: InkWell(
+                                                    onTap: () => setState(() =>
+                                                        _isHeaderCollapsed =
+                                                            false),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            AppSpacing.radiusSm),
+                                                    child: Padding(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          vertical: 2.0,
+                                                          horizontal: 4.0),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            PhosphorIcons.note(
+                                                                PhosphorIconsStyle
+                                                                    .bold),
+                                                            size: 14,
+                                                            color:
+                                                                colors.primary,
+                                                          ),
+                                                          const SizedBox(
+                                                              width: 6),
+                                                          Expanded(
+                                                            child: Text(
+                                                              _titleController
+                                                                      .text
+                                                                      .trim()
+                                                                      .isEmpty
+                                                                  ? 'Untitled Document'
+                                                                  : _titleController
+                                                                      .text
+                                                                      .trim(),
+                                                              style: TextStyle(
+                                                                fontSize: 13.5,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                                color: colors
+                                                                    .textPrimary,
+                                                              ),
+                                                              maxLines: 1,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                // Quick tag pills in compact header
+                                                ...editorData.note.tags
+                                                    .take(2)
+                                                    .map((t) {
+                                                  final tagColor =
+                                                      t.colorValue != null
+                                                          ? Color(t.colorValue!)
+                                                          : colors.primary;
+                                                  return Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            right: 4),
+                                                    child: NeoGlassBadge(
+                                                      label: '#${t.name}',
+                                                      color: tagColor,
+                                                    ),
+                                                  );
+                                                }),
+                                                if (editorData.note.tags.length >
+                                                    2)
+                                                  Text(
+                                                    '+${editorData.note.tags.length - 2}',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color:
+                                                          colors.textTertiary,
+                                                    ),
+                                                  ),
+                                                const SizedBox(width: 4),
+                                                Tooltip(
+                                                  message:
+                                                      'Expand title and tags',
+                                                  child: InkWell(
+                                                    onTap: () => setState(() =>
+                                                        _isHeaderCollapsed =
+                                                            false),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            AppSpacing.radiusSm),
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                              4.0),
+                                                      child: Icon(
+                                                        Icons
+                                                            .keyboard_arrow_down_rounded,
+                                                        size: 18,
+                                                        color: colors
+                                                            .textSecondary,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         ),
-
-                                        const SizedBox(height: 16),
-                                        Divider(
-                                            color:
-                                                colors.border.withOpacity(0.3),
-                                            height: 1),
-                                        const SizedBox(height: 12),
 
                                         // AppFlowy Editor (Professional typography configured via Settings)
                                         Expanded(
@@ -820,170 +1112,415 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                             builder: (context) {
                                               final settings =
                                                   ref.watch(settingsProvider);
-                                              final aiService =
-                                                  ref.watch(aiWritingServiceProvider);
+                                              final aiService = ref.watch(
+                                                  aiWritingServiceProvider);
                                               final currentFontSize = isMobile
                                                   ? (settings.editorFontSize -
                                                       1.0)
                                                   : settings.editorFontSize;
 
-                                              final customBuilders = Map<String, BlockComponentBuilder>.from(standardBlockComponentBuilderMap);
-                                              customBuilders[ParagraphBlockKeys.type] = ParagraphBlockComponentBuilder(
-                                                configuration: BlockComponentConfiguration(
-                                                  // Split spacing symmetrically: half above + half below each block.
-                                                  // Using only(bottom:) stacks the full gap between consecutive paragraphs,
-                                                  // making Enter appear to create a double-sized gap.
-                                                  padding: (node) => EdgeInsets.symmetric(
-                                                    vertical: settings.paragraphSpacing / 2,
+                                              final customBuilders =
+                                                  Map<String, BlockComponentBuilder>.from(
+                                                      standardBlockComponentBuilderMap);
+                                              customBuilders[ParagraphBlockKeys.type] =
+                                                  ParagraphBlockComponentBuilder(
+                                                configuration:
+                                                    BlockComponentConfiguration(
+                                                  padding: (node) =>
+                                                      EdgeInsets.symmetric(
+                                                    vertical: settings
+                                                            .paragraphSpacing /
+                                                        2,
                                                   ),
                                                 ),
                                               );
-                                              customBuilders[TodoListBlockKeys.type] = TodoListBlockComponentBuilder(
-                                                configuration: BlockComponentConfiguration(
-                                                  padding: (node) => const EdgeInsets.symmetric(vertical: 0.0),
+                                              customBuilders[TodoListBlockKeys.type] =
+                                                  TodoListBlockComponentBuilder(
+                                                configuration:
+                                                    BlockComponentConfiguration(
+                                                  padding: (node) =>
+                                                      const EdgeInsets.symmetric(
+                                                          vertical: 0.0),
                                                 ),
                                               );
-                                              customBuilders[BulletedListBlockKeys.type] = BulletedListBlockComponentBuilder(
-                                                configuration: BlockComponentConfiguration(
-                                                  padding: (node) => const EdgeInsets.symmetric(vertical: 0.0),
+                                              customBuilders[BulletedListBlockKeys.type] =
+                                                  BulletedListBlockComponentBuilder(
+                                                configuration:
+                                                    BlockComponentConfiguration(
+                                                  padding: (node) =>
+                                                      const EdgeInsets.symmetric(
+                                                          vertical: 0.0),
                                                 ),
                                               );
-                                              customBuilders[NumberedListBlockKeys.type] = NumberedListBlockComponentBuilder(
-                                                configuration: BlockComponentConfiguration(
-                                                  padding: (node) => const EdgeInsets.symmetric(vertical: 0.0),
+                                              customBuilders[NumberedListBlockKeys.type] =
+                                                  NumberedListBlockComponentBuilder(
+                                                configuration:
+                                                    BlockComponentConfiguration(
+                                                  padding: (node) =>
+                                                      const EdgeInsets.symmetric(
+                                                          vertical: 0.0),
                                                 ),
                                               );
-                                              customBuilders[DividerBlockKeys.type] = DividerBlockComponentBuilder(
-                                                configuration: BlockComponentConfiguration(
-                                                  padding: (node) => const EdgeInsets.symmetric(vertical: 4.0),
+                                              customBuilders[DividerBlockKeys.type] =
+                                                  DividerBlockComponentBuilder(
+                                                configuration:
+                                                    BlockComponentConfiguration(
+                                                  padding: (node) =>
+                                                      const EdgeInsets.symmetric(
+                                                          vertical: 4.0),
                                                 ),
                                               );
+                                              // Custom Image and Table component builders
+                                              customBuilders[ImageBlockKeys.type] =
+                                                  CustomImageBlockComponentBuilder(
+                                                editorState:
+                                                    editorData.editorState,
+                                              );
+                                              customBuilders[TableBlockKeys.type] =
+                                                  TableBlockComponentBuilder();
+                                              customBuilders[TableCellBlockKeys.type] =
+                                                  TableCellBlockComponentBuilder();
 
                                               editorData.editorState.renderer =
                                                   BlockComponentRenderer(
                                                 builders: customBuilders,
                                               );
 
-                                              return Listener(
-                                                onPointerDown: (event) {
-                                                  if (event.kind == PointerDeviceKind.mouse &&
-                                                      event.buttons == kSecondaryMouseButton) {
-                                                    final sel = editorData.editorState.selection;
-                                                    if (sel != null && !sel.isCollapsed) {
-                                                      final textList = editorData.editorState.getTextInSelection(sel);
-                                                      final selectedText = textList.join('\n');
-                                                      if (selectedText.trim().isNotEmpty) {
-                                                        final fullDocText = editorData.editorState.document.root.children
-                                                            .map((n) => n.delta?.toPlainText() ?? '')
-                                                            .where((s) => s.trim().isNotEmpty)
-                                                            .join('\n');
-                                                        EditorContextMenu.show(
-                                                          context: context,
-                                                          position: event.position,
-                                                          selectedText: selectedText,
-                                                          fullDocText: fullDocText,
-                                                          aiService: aiService,
-                                                          editorState: editorData.editorState,
-                                                        );
-                                                      }
+                                              return NotificationListener<ScrollNotification>(
+                                                onNotification: (notif) {
+                                                  if (notif.metrics.axis ==
+                                                      Axis.vertical) {
+                                                    if (notif.metrics.pixels >
+                                                            35 &&
+                                                        !_isHeaderCollapsed) {
+                                                      setState(() =>
+                                                          _isHeaderCollapsed =
+                                                              true);
+                                                    } else if (notif.metrics
+                                                                .pixels <=
+                                                            8 &&
+                                                        _isHeaderCollapsed) {
+                                                      setState(() =>
+                                                          _isHeaderCollapsed =
+                                                              false);
                                                     }
                                                   }
+                                                  return false;
                                                 },
-                                                child: AppFlowyEditor(
-                                                  key: ValueKey(
-                                                    'editor_${widget.noteId}_${settings.paragraphSpacing}_${settings.lineHeight}_${settings.editorFont}_$currentFontSize',
-                                                  ),
-                                                  editorState:
-                                                      editorData.editorState,
-                                                  contextMenuItems: const [],
-                                                  footer: const SizedBox(height: 48),
-                                                  editorStyle:
-                                                      EditorStyle.desktop(
-                                                    padding: EdgeInsets.zero,
-                                                    cursorColor: colors.primary,
-                                                    selectionColor: colors.primary
-                                                        .withOpacity(0.22),
-                                                    textStyleConfiguration:
-                                                        TextStyleConfiguration(
-                                                      text: _getEditorTextStyle(
-                                                        settings.editorFont,
-                                                        currentFontSize,
-                                                        colors.textPrimary,
-                                                        height: settings.lineHeight,
-                                                      ),
-                                                      code: GoogleFonts
-                                                          .jetBrainsMono(
-                                                        fontSize:
-                                                            currentFontSize - 2.5,
-                                                        height: settings.lineHeight + 0.1,
-                                                        color: colors.textPrimary,
+                                                child: Listener(
+                                                  onPointerDown: (event) {
+                                                    if (event.kind ==
+                                                            PointerDeviceKind
+                                                                .mouse &&
+                                                        event.buttons ==
+                                                            kSecondaryMouseButton) {
+                                                      final sel = editorData
+                                                          .editorState
+                                                          .selection;
+                                                      if (sel != null &&
+                                                          !sel.isCollapsed) {
+                                                        final textList =
+                                                            editorData.editorState
+                                                                .getTextInSelection(
+                                                                    sel);
+                                                        final selectedText =
+                                                            textList.join('\n');
+                                                        if (selectedText
+                                                            .trim()
+                                                            .isNotEmpty) {
+                                                          final fullDocText =
+                                                              editorData
+                                                                  .editorState
+                                                                  .document
+                                                                  .root
+                                                                  .children
+                                                                  .map((n) =>
+                                                                      n.delta
+                                                                          ?.toPlainText() ??
+                                                                      '')
+                                                                  .where((s) =>
+                                                                      s.trim()
+                                                                          .isNotEmpty)
+                                                                  .join('\n');
+                                                          EditorContextMenu.show(
+                                                            context: context,
+                                                            position:
+                                                                event.position,
+                                                            selectedText:
+                                                                selectedText,
+                                                            fullDocText:
+                                                                fullDocText,
+                                                            aiService:
+                                                                aiService,
+                                                            editorState: editorData
+                                                                .editorState,
+                                                          );
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  child: AppFlowyEditor(
+                                                    key: ValueKey(
+                                                      'editor_${widget.noteId}_${settings.paragraphSpacing}_${settings.lineHeight}_${settings.editorFont}_$currentFontSize',
+                                                    ),
+                                                    editorState:
+                                                        editorData.editorState,
+                                                    contextMenuItems: const [],
+                                                    footer: const SizedBox(
+                                                        height: 48),
+                                                    editorStyle:
+                                                        EditorStyle.desktop(
+                                                      padding: EdgeInsets.zero,
+                                                      cursorColor:
+                                                          colors.primary,
+                                                      selectionColor: colors
+                                                          .primary
+                                                          .withOpacity(0.22),
+                                                      textSpanDecorator:
+                                                          (context, node, index,
+                                                              text, before,
+                                                              after) {
+                                                        final baseSpan =
+                                                            defaultTextSpanDecoratorForAttribute(
+                                                                context,
+                                                                node,
+                                                                index,
+                                                                text,
+                                                                before,
+                                                                after);
+                                                        final customSize = text
+                                                                .attributes?[
+                                                            'fontSize'];
+                                                        if (customSize !=
+                                                                null &&
+                                                            customSize is num) {
+                                                          return TextSpan(
+                                                            style: (baseSpan
+                                                                        .style ??
+                                                                    const TextStyle())
+                                                                .copyWith(
+                                                              fontSize: customSize
+                                                                  .toDouble(),
+                                                            ),
+                                                            text: baseSpan.text,
+                                                            children: baseSpan
+                                                                .children,
+                                                            recognizer: baseSpan
+                                                                .recognizer,
+                                                            mouseCursor: baseSpan
+                                                                .mouseCursor,
+                                                          );
+                                                        }
+                                                        return baseSpan;
+                                                      },
+                                                      textStyleConfiguration:
+                                                          TextStyleConfiguration(
+                                                        text: _getEditorTextStyle(
+                                                          settings.editorFont,
+                                                          currentFontSize,
+                                                          colors.textPrimary,
+                                                          height: settings
+                                                              .lineHeight,
+                                                        ),
+                                                        code: GoogleFonts
+                                                            .jetBrainsMono(
+                                                          fontSize:
+                                                              currentFontSize -
+                                                                  2.5,
+                                                          height: settings
+                                                                  .lineHeight +
+                                                              0.1,
+                                                          color: colors
+                                                              .textPrimary,
+                                                        ),
                                                       ),
                                                     ),
-                                                  ),
-                                                  blockComponentBuilders:
-                                                      customBuilders,
-                                                  commandShortcutEvents: [
-                                                  CommandShortcutEvent(
-                                                    key: 'smart markdown paste',
-                                                    getDescription: () =>
-                                                        'paste rich markdown content',
-                                                    command: 'ctrl+v',
-                                                    handler: (editorState) {
-                                                      MarkdownPasteService
-                                                              .handlePaste(
-                                                                  editorState)
-                                                          .then((handled) {
-                                                        if (!handled) {
-                                                          for (final event
-                                                              in standardCommandShortcutEvents) {
-                                                            if (event.key ==
-                                                                'paste the content') {
-                                                              event.handler(
-                                                                  editorState);
-                                                              break;
+                                                    blockComponentBuilders:
+                                                        customBuilders,
+                                                    commandShortcutEvents: [
+                                                      CommandShortcutEvent(
+                                                        key:
+                                                            'smart markdown paste',
+                                                        getDescription: () =>
+                                                            'paste rich markdown content',
+                                                        command: 'ctrl+v',
+                                                        handler:
+                                                            (editorState) {
+                                                          MarkdownPasteService
+                                                                  .handlePaste(
+                                                                      editorState)
+                                                              .then((handled) {
+                                                            if (!handled) {
+                                                              for (final event
+                                                                  in standardCommandShortcutEvents) {
+                                                                if (event.key ==
+                                                                    'paste the content') {
+                                                                  event.handler(
+                                                                      editorState);
+                                                                  break;
+                                                                }
+                                                              }
                                                             }
-                                                          }
-                                                        }
-                                                      });
-                                                      return KeyEventResult
-                                                          .handled;
-                                                    },
-                                                  ),
-                                                  CommandShortcutEvent(
-                                                    key:
-                                                        'smart markdown paste mac',
-                                                    getDescription: () =>
-                                                        'paste rich markdown content',
-                                                    command: 'cmd+v',
-                                                    handler: (editorState) {
-                                                      MarkdownPasteService
-                                                              .handlePaste(
-                                                                  editorState)
-                                                          .then((handled) {
-                                                        if (!handled) {
-                                                          for (final event
-                                                              in standardCommandShortcutEvents) {
-                                                            if (event.key ==
-                                                                'paste the content') {
-                                                              event.handler(
-                                                                  editorState);
-                                                              break;
+                                                          });
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        },
+                                                      ),
+                                                      CommandShortcutEvent(
+                                                        key:
+                                                            'smart markdown paste mac',
+                                                        getDescription: () =>
+                                                            'paste rich markdown content',
+                                                        command: 'cmd+v',
+                                                        handler:
+                                                            (editorState) {
+                                                          MarkdownPasteService
+                                                                  .handlePaste(
+                                                                      editorState)
+                                                              .then((handled) {
+                                                            if (!handled) {
+                                                              for (final event
+                                                                  in standardCommandShortcutEvents) {
+                                                                if (event.key ==
+                                                                    'paste the content') {
+                                                                  event.handler(
+                                                                      editorState);
+                                                                  break;
+                                                                }
+                                                              }
                                                             }
-                                                          }
-                                                        }
-                                                      });
-                                                      return KeyEventResult
-                                                          .handled;
-                                                    },
+                                                          });
+                                                          return KeyEventResult
+                                                              .handled;
+                                                        },
+                                                      ),
+                                                      ...standardCommandShortcutEvents
+                                                          .where((e) =>
+                                                              e.key !=
+                                                              'paste the content'),
+                                                    ],
+                                                    characterShortcutEvents:
+                                                        standardCharacterShortcutEvents,
                                                   ),
-                                                  ...standardCommandShortcutEvents
-                                                      .where((e) =>
-                                                          e.key !=
-                                                          'paste the content'),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+
+                                        // ── Minimal Bottom Status Bar ──
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            border: Border(
+                                              top: BorderSide(
+                                                color: colors.border
+                                                    .withOpacity(0.25),
+                                              ),
+                                            ),
+                                          ),
+                                          child: LayoutBuilder(
+                                            builder:
+                                                (context, statusConstraints) {
+                                              final isNarrow =
+                                                  statusConstraints.maxWidth <
+                                                      420;
+                                              return Row(
+                                                children: [
+                                                  Icon(
+                                                    PhosphorIcons.textAa(),
+                                                    size: 13,
+                                                    color:
+                                                        colors.textTertiary,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    '${editorData.wordCount} words',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color:
+                                                          colors.textSecondary,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                  if (!isNarrow) ...[
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      '•',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: colors
+                                                            .textTertiary
+                                                            .withOpacity(0.5),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      '${editorData.charCount} characters',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color:
+                                                            colors.textTertiary,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      '•',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: colors
+                                                            .textTertiary
+                                                            .withOpacity(0.5),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      '${editorData.readingTimeMinutes} min read',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color:
+                                                            colors.textTertiary,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                  const Spacer(),
+                                                  // Dynamic Auto-Save Indicator
+                                                  Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        editorData.isSaving
+                                                            ? Icons
+                                                                .sync_rounded
+                                                            : Icons
+                                                                .check_circle_outline_rounded,
+                                                        size: 12.5,
+                                                        color: editorData
+                                                                .isSaving
+                                                            ? AppColors.accent
+                                                            : AppColors
+                                                                .success,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        editorData.isSaving
+                                                            ? 'Saving...'
+                                                            : 'Saved',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: colors
+                                                              .textTertiary,
+                                                          fontWeight:
+                                                              FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ],
-                                                characterShortcutEvents:
-                                                    standardCharacterShortcutEvents,
-                                              ));
+                                              );
                                             },
                                           ),
                                         ),
@@ -1072,6 +1609,7 @@ class _EditorToolbar extends ConsumerStatefulWidget {
   final EditorState editorState;
   final Note note;
   final VoidCallback? onInsertImage;
+  final VoidCallback? onInsertTable;
   final VoidCallback? onToggleResearch;
   final VoidCallback? onToggleAi;
   final bool isResearchOpen;
@@ -1081,6 +1619,7 @@ class _EditorToolbar extends ConsumerStatefulWidget {
     required this.editorState,
     required this.note,
     this.onInsertImage,
+    this.onInsertTable,
     this.onToggleResearch,
     this.onToggleAi,
     this.isResearchOpen = false,
@@ -1145,6 +1684,95 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
         return;
       }
     }
+  }
+
+  void _formatOrInsertBlock(String type, {int? level}) {
+    final selection = widget.editorState.selection;
+    if (selection != null && selection.end.path.isNotEmpty) {
+      final path = [selection.end.path[0]];
+      final currentNode = widget.editorState.getNodeAtPath(path);
+      if (currentNode != null) {
+        final currentDelta = currentNode.delta ?? Delta();
+        final transaction = widget.editorState.transaction;
+        Node newNode;
+        switch (type) {
+          case 'heading':
+            newNode = headingNode(level: level ?? 1, delta: currentDelta);
+            break;
+          case 'bulleted_list':
+            newNode = bulletedListNode(delta: currentDelta);
+            break;
+          case 'numbered_list':
+            newNode = numberedListNode(delta: currentDelta);
+            break;
+          case 'todo_list':
+            newNode = todoListNode(checked: false, delta: currentDelta);
+            break;
+          case 'quote':
+            newNode = quoteNode(delta: currentDelta);
+            break;
+          case 'divider':
+            newNode = dividerNode();
+            break;
+          case 'code':
+            _triggerShortcut('code');
+            return;
+          case 'paragraph':
+          default:
+            newNode = paragraphNode(delta: currentDelta);
+            break;
+        }
+        transaction.deleteNode(currentNode);
+        transaction.insertNode(path, newNode);
+        widget.editorState.apply(transaction);
+        return;
+      }
+    }
+    _insertNode(type, level: level);
+  }
+
+  void _applySelectionFontSize(double? size) {
+    final sel = widget.editorState.selection;
+    if (sel == null || sel.isCollapsed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Highlight words or text in the note to adjust their font size.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    if (size == null) {
+      widget.editorState.formatDelta(sel, {'fontSize': null});
+    } else {
+      widget.editorState.formatDelta(sel, {'fontSize': size});
+    }
+  }
+
+  PopupMenuItem<double?> _buildFontSizeMenuItem(
+      double size, String label, AppColorScheme colors) {
+    return PopupMenuItem<double?>(
+      value: size,
+      height: 32,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: colors.textPrimary),
+          ),
+          Text(
+            '${size.toInt()}pt',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: colors.textSecondary.withOpacity(0.7),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _insertNode(String type, {int? level, String text = ''}) {
@@ -1274,6 +1902,23 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
                         physics: const BouncingScrollPhysics(),
                         child: Row(
                           children: [
+                            // ── 0. History (Undo / Redo) ──
+                            _ToolbarItem(
+                              icon: PhosphorIcons.arrowUUpLeft(
+                                  PhosphorIconsStyle.bold),
+                              tooltip: 'Undo (Ctrl+Z)',
+                              onTap: () =>
+                                  widget.editorState.undoManager.undo(),
+                            ),
+                            _ToolbarItem(
+                              icon: PhosphorIcons.arrowUUpRight(
+                                  PhosphorIconsStyle.bold),
+                              tooltip: 'Redo (Ctrl+Y / Ctrl+Shift+Z)',
+                              onTap: () =>
+                                  widget.editorState.undoManager.redo(),
+                            ),
+                            _VerticalDivider(color: colors.border),
+
                             // ── 1. Font Family Dropdown ──
                             Container(
                               height: 28,
@@ -1323,66 +1968,152 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
                             ),
                             const SizedBox(width: 4),
 
-                            // ── 2. Font Size Stepper ──
-                            Container(
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: colors.surface2.withOpacity(0.6),
+                            // ── 2. Document Font Size Stepper ──
+                            Tooltip(
+                              message: 'Entire Document Font Size',
+                              child: Container(
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: colors.surface2.withOpacity(0.6),
+                                  borderRadius:
+                                      BorderRadius.circular(AppSpacing.radiusSm),
+                                  border: Border.all(
+                                      color: colors.border.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    InkWell(
+                                      onTap: settings.editorFontSize > 12.0
+                                          ? () => settingsNotifier
+                                              .updateEditorFontSize(
+                                                  settings.editorFontSize - 1.0)
+                                          : null,
+                                      borderRadius: const BorderRadius.horizontal(
+                                          left: Radius.circular(
+                                              AppSpacing.radiusSm)),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 5, vertical: 4),
+                                        child: Icon(Icons.remove_rounded,
+                                            size: 14,
+                                            color: colors.textSecondary),
+                                      ),
+                                    ),
+                                    Text(
+                                      '${settings.editorFontSize.toInt()}',
+                                      style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: colors.textPrimary),
+                                    ),
+                                    InkWell(
+                                      onTap: settings.editorFontSize < 28.0
+                                          ? () => settingsNotifier
+                                              .updateEditorFontSize(
+                                                  settings.editorFontSize + 1.0)
+                                          : null,
+                                      borderRadius: const BorderRadius.horizontal(
+                                          right: Radius.circular(
+                                              AppSpacing.radiusSm)),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 5, vertical: 4),
+                                        child: Icon(Icons.add_rounded,
+                                            size: 14,
+                                            color: colors.textSecondary),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // ── 3. Selected Word / Text Custom Font Size ──
+                            PopupMenuButton<double?>(
+                              tooltip: 'Selected Text Font Size (Highlight text first)',
+                              offset: const Offset(0, 32),
+                              color: colors.surface,
+                              shape: RoundedRectangleBorder(
                                 borderRadius:
-                                    BorderRadius.circular(AppSpacing.radiusSm),
-                                border: Border.all(
+                                    BorderRadius.circular(AppSpacing.radiusMd),
+                                side: BorderSide(
                                     color: colors.border.withOpacity(0.4)),
                               ),
-                              child: Row(
-                                children: [
-                                  InkWell(
-                                    onTap: settings.editorFontSize > 12.0
-                                        ? () => settingsNotifier
-                                            .updateEditorFontSize(
-                                                settings.editorFontSize - 1.0)
-                                        : null,
-                                    borderRadius: const BorderRadius.horizontal(
-                                        left: Radius.circular(
-                                            AppSpacing.radiusSm)),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 5, vertical: 4),
-                                      child: Icon(Icons.remove_rounded,
-                                          size: 14,
-                                          color: colors.textSecondary),
+                              child: Container(
+                                height: 28,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 6),
+                                decoration: BoxDecoration(
+                                  color: colors.surface2.withOpacity(0.6),
+                                  borderRadius:
+                                      BorderRadius.circular(AppSpacing.radiusSm),
+                                  border: Border.all(
+                                      color: colors.border.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(PhosphorIcons.textAa(PhosphorIconsStyle.bold),
+                                        size: 13, color: colors.textSecondary),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Word Size',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: colors.textPrimary),
                                     ),
-                                  ),
-                                  Text(
-                                    '${settings.editorFontSize.toInt()}',
-                                    style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: colors.textPrimary),
-                                  ),
-                                  InkWell(
-                                    onTap: settings.editorFontSize < 28.0
-                                        ? () => settingsNotifier
-                                            .updateEditorFontSize(
-                                                settings.editorFontSize + 1.0)
-                                        : null,
-                                    borderRadius: const BorderRadius.horizontal(
-                                        right: Radius.circular(
-                                            AppSpacing.radiusSm)),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 5, vertical: 4),
-                                      child: Icon(Icons.add_rounded,
-                                          size: 14,
-                                          color: colors.textSecondary),
-                                    ),
-                                  ),
-                                ],
+                                    Icon(Icons.arrow_drop_down_rounded,
+                                        size: 14, color: colors.textSecondary),
+                                  ],
+                                ),
                               ),
+                              onSelected: (size) => _applySelectionFontSize(size),
+                              itemBuilder: (ctx) => [
+                                PopupMenuItem<double?>(
+                                  enabled: false,
+                                  height: 26,
+                                  child: Text(
+                                    'SELECTED TEXT SIZE',
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: colors.textSecondary.withOpacity(0.6),
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                                ),
+                                const PopupMenuDivider(height: 1),
+                                PopupMenuItem<double?>(
+                                  value: null,
+                                  height: 32,
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.refresh_rounded,
+                                          size: 15, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      const Text('Default (Reset)',
+                                          style: TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(height: 1),
+                                _buildFontSizeMenuItem(10, '10 px - Extra Small', colors),
+                                _buildFontSizeMenuItem(12, '12 px - Small', colors),
+                                _buildFontSizeMenuItem(14, '14 px - Regular', colors),
+                                _buildFontSizeMenuItem(16, '16 px - Medium', colors),
+                                _buildFontSizeMenuItem(18, '18 px - Large', colors),
+                                _buildFontSizeMenuItem(20, '20 px - Extra Large', colors),
+                                _buildFontSizeMenuItem(24, '24 px - Heading 2 Size', colors),
+                                _buildFontSizeMenuItem(28, '28 px - Heading 1 Size', colors),
+                                _buildFontSizeMenuItem(34, '34 px - Display Huge', colors),
+                              ],
                             ),
 
                             _VerticalDivider(color: colors.border),
 
-                            // ── 3. Text Formatting ──
+                            // ── 4. Inline Text Formatting ──
                             _ToolbarItem(
                               icon:
                                   PhosphorIcons.textB(PhosphorIconsStyle.bold),
@@ -1415,7 +2146,7 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
 
                             _VerticalDivider(color: colors.border),
 
-                            // ── 4. Line & Paragraph Spacing ──
+                            // ── 5. Line & Paragraph Spacing ──
                             _ParagraphSpacingToolbarItem(
                               currentSpacing: settings.paragraphSpacing,
                               onSpacingChanged: (val) =>
@@ -1424,48 +2155,204 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
 
                             _VerticalDivider(color: colors.border),
 
-                            // ── 5. Blocks & Lists ──
-                            _ToolbarItem(
-                              icon: PhosphorIcons.textHOne(
-                                  PhosphorIconsStyle.bold),
-                              tooltip: 'Heading 1 (#)',
-                              onTap: () => _insertNode('heading', level: 1),
+                            // ── 6. Unified Headings & Block Styles Dropdown ──
+                            PopupMenuButton<String>(
+                              tooltip: 'Heading & Block Style',
+                              offset: const Offset(0, 32),
+                              color: colors.surface,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppSpacing.radiusMd),
+                                side: BorderSide(
+                                    color: colors.border.withOpacity(0.4)),
+                              ),
+                              child: Container(
+                                height: 28,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 6),
+                                decoration: BoxDecoration(
+                                  color: colors.surface2.withOpacity(0.6),
+                                  borderRadius:
+                                      BorderRadius.circular(AppSpacing.radiusSm),
+                                  border: Border.all(
+                                      color: colors.border.withOpacity(0.4)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(PhosphorIcons.textH(PhosphorIconsStyle.bold),
+                                        size: 14, color: colors.textSecondary),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Heading',
+                                      style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: colors.textPrimary),
+                                    ),
+                                    Icon(Icons.arrow_drop_down_rounded,
+                                        size: 14, color: colors.textSecondary),
+                                  ],
+                                ),
+                              ),
+                              onSelected: (val) {
+                                switch (val) {
+                                  case 'h1':
+                                    _formatOrInsertBlock('heading', level: 1);
+                                    break;
+                                  case 'h2':
+                                    _formatOrInsertBlock('heading', level: 2);
+                                    break;
+                                  case 'h3':
+                                    _formatOrInsertBlock('heading', level: 3);
+                                    break;
+                                  case 'h4':
+                                    _formatOrInsertBlock('heading', level: 4);
+                                    break;
+                                  case 'paragraph':
+                                    _formatOrInsertBlock('paragraph');
+                                    break;
+                                  case 'quote':
+                                    _formatOrInsertBlock('quote');
+                                    break;
+                                  case 'code':
+                                    _formatOrInsertBlock('code');
+                                    break;
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                PopupMenuItem(
+                                  value: 'h1',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.textHOne(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textPrimary),
+                                      const SizedBox(width: 8),
+                                      const Text('Heading 1',
+                                          style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'h2',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.textHTwo(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textPrimary),
+                                      const SizedBox(width: 8),
+                                      const Text('Heading 2',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'h3',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.textHThree(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textPrimary),
+                                      const SizedBox(width: 8),
+                                      const Text('Heading 3',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'h4',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.textHFour(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textPrimary),
+                                      const SizedBox(width: 8),
+                                      const Text('Heading 4',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600)),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(height: 1),
+                                PopupMenuItem(
+                                  value: 'paragraph',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.paragraph(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      const Text('Normal Text',
+                                          style: TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'quote',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.quotes(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      const Text('Blockquote',
+                                          style: TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'code',
+                                  height: 36,
+                                  child: Row(
+                                    children: [
+                                      Icon(PhosphorIcons.code(PhosphorIconsStyle.bold),
+                                          size: 16, color: colors.textSecondary),
+                                      const SizedBox(width: 8),
+                                      const Text('Code Block',
+                                          style: TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            _ToolbarItem(
-                              icon: PhosphorIcons.textHTwo(
-                                  PhosphorIconsStyle.bold),
-                              tooltip: 'Heading 2 (##)',
-                              onTap: () => _insertNode('heading', level: 2),
-                            ),
+                            const SizedBox(width: 2),
+
+                            // ── 7. Lists, Dividers & Table ──
                             _ToolbarItem(
                               icon: PhosphorIcons.listBullets(
                                   PhosphorIconsStyle.bold),
                               tooltip: 'Bulleted List (-)',
-                              onTap: () => _insertNode('bulleted_list'),
+                              onTap: () => _formatOrInsertBlock('bulleted_list'),
                             ),
                             _ToolbarItem(
                               icon: PhosphorIcons.listNumbers(
                                   PhosphorIconsStyle.bold),
                               tooltip: 'Numbered List (1.)',
-                              onTap: () => _insertNode('numbered_list'),
+                              onTap: () => _formatOrInsertBlock('numbered_list'),
                             ),
                             _ToolbarItem(
                               icon: PhosphorIcons.checkSquare(
                                   PhosphorIconsStyle.bold),
                               tooltip: 'Checklist / Todo ([ ])',
-                              onTap: () => _insertNode('todo_list'),
+                              onTap: () => _formatOrInsertBlock('todo_list'),
                             ),
                             _ToolbarItem(
-                              icon:
-                                  PhosphorIcons.quotes(PhosphorIconsStyle.bold),
-                              tooltip: 'Quote Block (>)',
-                              onTap: () => _insertNode('quote'),
-                            ),
-                            _ToolbarItem(
-                              icon:
-                                  PhosphorIcons.minus(PhosphorIconsStyle.bold),
+                              icon: PhosphorIcons.minus(PhosphorIconsStyle.bold),
                               tooltip: 'Divider Line (---)',
                               onTap: () => _insertNode('divider'),
+                            ),
+                            _ToolbarItem(
+                              icon: PhosphorIcons.table(PhosphorIconsStyle.bold),
+                              tooltip: 'Insert Table / Grid (Custom Rows & Columns)',
+                              onTap: widget.onInsertTable ?? () {},
                             ),
 
                             _VerticalDivider(color: colors.border),
@@ -1721,7 +2608,7 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
 
                             _VerticalDivider(color: colors.border),
 
-                            // ── 6. Paste / Undo / Redo / Image / AI / Research ──
+                            // ── 8. Paste / Image / AI / Research ──
                             _ToolbarItem(
                               icon: PhosphorIcons.clipboardText(
                                   PhosphorIconsStyle.bold),
@@ -1744,21 +2631,10 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
                               },
                             ),
                             _ToolbarItem(
-                              icon: PhosphorIcons.arrowUUpLeft(
-                                  PhosphorIconsStyle.bold),
-                              tooltip: 'Undo (Ctrl+Z)',
-                              onTap: () => _triggerShortcut('undo'),
-                            ),
-                            _ToolbarItem(
-                              icon: PhosphorIcons.arrowUUpRight(
-                                  PhosphorIconsStyle.bold),
-                              tooltip: 'Redo (Ctrl+Y)',
-                              onTap: () => _triggerShortcut('redo'),
-                            ),
-                            _ToolbarItem(
                               icon:
                                   PhosphorIcons.image(PhosphorIconsStyle.bold),
-                              tooltip: 'Insert Image',
+                              tooltip:
+                                  'Insert Image (Supports resize, crop, rotate, flip & align)',
                               onTap: widget.onInsertImage ?? () {},
                             ),
                             _ToolbarItem(

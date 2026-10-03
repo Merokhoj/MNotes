@@ -275,7 +275,7 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: colors.surface2.withOpacity(0.96),
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -288,19 +288,13 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
           ),
         ],
       ),
-      child: Row(
-        children: [
-          // Selected count badge
-          NeoGlassBadge(
-            label: '$count selected',
-            color: colors.primary,
-          ),
-          const SizedBox(width: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 265;
 
-          // Select all / Deselect all button
-          TextButton(
+          final selectAllBtn = TextButton(
             style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -316,47 +310,43 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
             child: Text(
               allSelected ? 'Deselect All' : 'Select All',
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: colors.primary,
               ),
             ),
-          ),
+          );
 
-          const Spacer(),
+          final countBadge = NeoGlassBadge(
+            label: '$count selected',
+            color: colors.primary,
+          );
 
-          // Restore action (if in Trash)
-          if (isTrash)
-            Tooltip(
-              message: 'Restore selected ($count)',
-              child: IconButton(
-                icon: const Icon(Icons.restore_from_trash_rounded, size: 18),
-                color: AppColors.success,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                splashRadius: 18,
-                onPressed: count > 0 ? () => _handleBulkRestore(context) : null,
-              ),
+          final restoreBtn = Tooltip(
+            message: 'Restore selected ($count)',
+            child: IconButton(
+              icon: const Icon(Icons.restore_from_trash_rounded, size: 18),
+              color: AppColors.success,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              splashRadius: 16,
+              onPressed: count > 0 ? () => _handleBulkRestore(context) : null,
             ),
+          );
 
-          // Move to Folder (if not in Trash)
-          if (!isTrash)
-            Tooltip(
-              message: 'Move selected to folder ($count)',
-              child: IconButton(
-                icon: const Icon(Icons.drive_file_move_outlined, size: 18),
-                color: colors.textSecondary,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                splashRadius: 18,
-                onPressed: count > 0 ? () => _handleBulkMoveToFolder(context) : null,
-              ),
+          final moveToFolderBtn = Tooltip(
+            message: 'Move selected to folder ($count)',
+            child: IconButton(
+              icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+              color: colors.textSecondary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              splashRadius: 16,
+              onPressed: count > 0 ? () => _handleBulkMoveToFolder(context) : null,
             ),
+          );
 
-          const SizedBox(width: 4),
-
-          // Remove All / Delete action ("रिमुभ अल एकैचोटी")
-          Tooltip(
+          final deleteBtn = Tooltip(
             message: isTrash
                 ? 'Delete permanently ($count)'
                 : 'Move to trash ($count)',
@@ -366,7 +356,7 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
                   : null,
               borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
                   color: count > 0
                       ? AppColors.error.withOpacity(0.12)
@@ -383,14 +373,14 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
                   children: [
                     Icon(
                       isTrash ? Icons.delete_forever_rounded : Icons.delete_outline_rounded,
-                      size: 15,
+                      size: 14,
                       color: count > 0 ? AppColors.error : colors.textTertiary,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 3),
                     Text(
                       isTrash ? 'Delete' : 'Remove',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: count > 0 ? AppColors.error : colors.textTertiary,
                       ),
@@ -399,8 +389,46 @@ class _NotesListWidgetState extends ConsumerState<NotesListWidget> {
                 ),
               ),
             ),
-          ),
-        ],
+          );
+
+          if (isNarrow) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    countBadge,
+                    const Spacer(),
+                    selectAllBtn,
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (isTrash) restoreBtn,
+                    if (!isTrash) moveToFolderBtn,
+                    const SizedBox(width: 6),
+                    deleteBtn,
+                  ],
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              countBadge,
+              const SizedBox(width: 8),
+              selectAllBtn,
+              const Spacer(),
+              if (isTrash) restoreBtn,
+              if (!isTrash) moveToFolderBtn,
+              const SizedBox(width: 4),
+              deleteBtn,
+            ],
+          );
+        },
       ),
     );
   }

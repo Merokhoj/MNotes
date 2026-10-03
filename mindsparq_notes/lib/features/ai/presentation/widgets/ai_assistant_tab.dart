@@ -1,16 +1,21 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_theme.dart';
+import '../../../../app/providers/settings_provider.dart';
 import '../../../../domain/models/note.dart';
 import '../../data/services/ai_writing_service.dart';
+import '../../data/services/voice_to_text_service.dart';
 import '../../domain/models/ai_message.dart';
 import '../../../notes/presentation/services/markdown_paste_service.dart';
+import '../../../media/data/services/attachment_storage_service.dart';
 
 const _uuid = Uuid();
 
@@ -39,6 +44,11 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
   bool _isProcessing = false;
   String _selectedContext = '';
 
+  // Attachments and Voice Input State
+  String? _attachedFilePath;
+  String? _attachedFileName;
+  bool _isListeningVoice = false;
+
   @override
   void initState() {
     super.initState();
@@ -49,7 +59,7 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
       AiMessage(
         id: _uuid.v4(),
         isUser: false,
-        text: 'Hello! I am your MindSparQ AI Writing & Research Assistant. You can ask me to rewrite, summarize, explain concepts, generate study flashcards, or draft content based on your note.',
+        text: 'Hello! I am your MindSparQ AI Writing & Research Assistant. You can ask questions, attach images or documents, dictate with voice, or synthesize content based on your note.',
         timestamp: DateTime.now(),
       ),
     );
@@ -108,17 +118,163 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
     }
   }
 
+  void _pickAttachment({bool imagesOnly = false}) async {
+    final service = ref.read(attachmentServiceProvider);
+    final path = await service.pickNativeFilePath(imagesOnly: imagesOnly);
+    if (path != null && mounted) {
+      setState(() {
+        _attachedFilePath = path;
+        _attachedFileName = p.basename(path);
+      });
+    }
+  }
+
+  void _toggleVoiceDictation() async {
+    final voiceService = ref.read(voiceToTextServiceProvider);
+    if (_isListeningVoice) {
+      voiceService.stopListening();
+      setState(() => _isListeningVoice = false);
+      return;
+    }
+
+    setState(() => _isListeningVoice = true);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Listening... speak now or press Windows + H for instant dictation'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+
+    final text = await voiceService.listenOnce();
+
+    if (mounted) {
+      setState(() => _isListeningVoice = false);
+      if (text != null && text.trim().isNotEmpty) {
+        if (_inputCtrl.text.trim().isEmpty) {
+          _inputCtrl.text = text.trim();
+        } else {
+          _inputCtrl.text = '${_inputCtrl.text.trim()} ${text.trim()}';
+        }
+        _inputCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _inputCtrl.text.length));
+      }
+    }
+  }
+
+  void _openApiKeyDialog() {
+    final currentKey = ref.read(settingsProvider).geminiApiKey;
+    final ctrl = TextEditingController(text: currentKey);
+    bool isSaving = false;
+    String? error;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          final colors = ctx.appColors;
+          return AlertDialog(
+            backgroundColor: colors.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.key_rounded, color: AppColors.accent, size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'Google Gemini API Key',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: colors.textPrimary),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enter your free Google Gemini API Key to enable live cloud AI, multimodal document & image synthesis, and deep research.',
+                  style: TextStyle(fontSize: 12.5, color: colors.textSecondary, height: 1.4),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: ctrl,
+                  style: TextStyle(fontSize: 13, color: colors.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'AIzaSy...',
+                    labelText: 'Gemini API Key',
+                    labelStyle: TextStyle(color: colors.textSecondary),
+                    border: const OutlineInputBorder(),
+                    errorText: error,
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Get your key free at: aistudio.google.com/apikey',
+                  style: TextStyle(fontSize: 11, color: colors.textTertiary),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: colors.primary),
+                onPressed: isSaving ? null : () async {
+                  final key = ctrl.text.trim();
+                  setDlgState(() { isSaving = true; error = null; });
+                  final res = await AiWritingService.validateApiKey(key);
+                  if (res.isValid) {
+                    await ref.read(settingsProvider.notifier).updateGeminiApiKey(key);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Connected to ${res.activeModel}! Live GenAI is now active.'),
+                          backgroundColor: AppColors.success,
+                        ),
+                      );
+                    }
+                  } else {
+                    setDlgState(() {
+                      isSaving = false;
+                      error = res.message;
+                    });
+                  }
+                },
+                child: isSaving
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Connect & Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   void _handleSend([String? presetPrompt]) async {
     final query = presetPrompt ?? _inputCtrl.text.trim();
-    if (query.isEmpty) return;
+    final filePath = _attachedFilePath;
+    final fileName = _attachedFileName;
+
+    if (query.isEmpty && filePath == null) return;
 
     if (presetPrompt == null) _inputCtrl.clear();
+
+    // Reset current active attachment
+    setState(() {
+      _attachedFilePath = null;
+      _attachedFileName = null;
+    });
 
     final userMsg = AiMessage(
       id: _uuid.v4(),
       isUser: true,
-      text: query,
+      text: query.isEmpty ? 'Analyze the attached file and synthesize key insights.' : query,
       timestamp: DateTime.now(),
+      attachedFilePath: filePath,
+      attachedFileName: fileName,
     );
 
     final loadingMsg = AiMessage(
@@ -142,10 +298,12 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
 
     final responseText = await service.executeTask(
       task: 'chat',
-      text: query,
+      text: query.isEmpty ? 'Analyze the attached file and summarize core takeaways.' : query,
       documentContext: activeContext.isNotEmpty
           ? 'USER HIGHLIGHTED NOTE EXCERPT:\n"""\n$activeContext\n"""\n\nFULL NOTE CONTEXT:\n$docContext'
           : docContext,
+      attachedFilePath: filePath,
+      attachedFileName: fileName,
     );
 
     if (mounted) {
@@ -219,7 +377,7 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
                   ),
                 ),
                 child: Text(
-                  hasApiKey ? 'LATEST • FAST' : 'OFFLINE',
+                  hasApiKey ? 'LIVE' : 'OFFLINE',
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w800,
@@ -229,10 +387,46 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
                 ),
               ),
               const Spacer(),
-              Text(
-                hasApiKey ? 'Cloud GenAI' : 'Deterministic',
-                style: TextStyle(fontSize: 10, color: colors.textTertiary),
-              ),
+              if (!hasApiKey)
+                InkWell(
+                  onTap: _openApiKeyDialog,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colors.primary.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: colors.primary.withOpacity(0.35)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.key_rounded, size: 11, color: colors.primary),
+                        const SizedBox(width: 3),
+                        Text(
+                          'Connect Key',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: colors.primary),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                InkWell(
+                  onTap: _openApiKeyDialog,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.vpn_key_outlined, size: 12, color: colors.textSecondary),
+                        const SizedBox(width: 3),
+                        Text('Change Key', style: TextStyle(fontSize: 10, color: colors.textSecondary)),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -340,6 +534,74 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
           ),
         ),
 
+        // ── Active Attached File Preview Banner ───────────────────
+        if (_attachedFilePath != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+            decoration: BoxDecoration(
+              color: colors.surface2.withOpacity(0.7),
+              border: Border(top: BorderSide(color: colors.border.withOpacity(0.4))),
+            ),
+            child: Row(
+              children: [
+                _buildAttachmentThumbnail(_attachedFilePath!),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _attachedFileName ?? 'Attached File',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: colors.textPrimary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'Ready for Gemini multimodal analysis',
+                        style: TextStyle(fontSize: 9.5, color: colors.textTertiary),
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: () => setState(() {
+                    _attachedFilePath = null;
+                    _attachedFileName = null;
+                  }),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 14, color: colors.textTertiary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // ── Voice Listening Indicator Banner ─────────────────────
+        if (_isListeningVoice)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+            color: Colors.redAccent.withOpacity(0.12),
+            child: Row(
+              children: [
+                const Icon(Icons.mic, color: Colors.redAccent, size: 16),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'Listening... Speak now (or press Win + H)',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.redAccent),
+                  ),
+                ),
+                InkWell(
+                  onTap: _toggleVoiceDictation,
+                  child: const Text('Cancel', style: TextStyle(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+
         // ── Bottom Input Row ─────────────────────────────────────
         Container(
           padding: const EdgeInsets.all(AppSpacing.sm),
@@ -349,6 +611,26 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
           ),
           child: Row(
             children: [
+              // Attach Image button
+              IconButton(
+                icon: Icon(PhosphorIcons.image(), size: 18),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                tooltip: 'Attach Image for AI analysis',
+                color: _attachedFilePath != null && _isImageFile(_attachedFilePath!) ? colors.primary : colors.textSecondary,
+                onPressed: () => _pickAttachment(imagesOnly: true),
+              ),
+              // Attach File button
+              IconButton(
+                icon: Icon(PhosphorIcons.paperclip(), size: 18),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                tooltip: 'Attach Document (PDF, TXT, MD, CSV)',
+                color: _attachedFilePath != null && !_isImageFile(_attachedFilePath!) ? colors.primary : colors.textSecondary,
+                onPressed: () => _pickAttachment(imagesOnly: false),
+              ),
+              const SizedBox(width: 4),
+              // Text Field
               Expanded(
                 child: Container(
                   height: 38,
@@ -361,7 +643,7 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
                     controller: _inputCtrl,
                     style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
                     decoration: InputDecoration(
-                      hintText: 'Ask AI anything about this note...',
+                      hintText: _attachedFilePath != null ? 'Ask AI about this file...' : 'Ask AI anything about this note...',
                       hintStyle: TextStyle(fontSize: 12, color: colors.textTertiary),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
@@ -371,7 +653,27 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
                   ),
                 ),
               ),
-              const SizedBox(width: AppSpacing.xs),
+              const SizedBox(width: 4),
+              // Mic / Voice-to-Text button
+              InkWell(
+                onTap: _toggleVoiceDictation,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: _isListeningVoice ? Colors.redAccent : colors.surface2,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  ),
+                  child: Icon(
+                    _isListeningVoice ? Icons.mic : PhosphorIcons.microphone(),
+                    size: 16,
+                    color: _isListeningVoice ? Colors.white : colors.textSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Send button
               InkWell(
                 onTap: _isProcessing ? null : () => _handleSend(),
                 borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
@@ -393,6 +695,35 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
           ),
         ),
       ],
+    );
+  }
+
+  bool _isImageFile(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].contains(ext);
+  }
+
+  Widget _buildAttachmentThumbnail(String path) {
+    if (_isImageFile(path)) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Image.file(
+          File(path),
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_rounded, size: 24),
+        ),
+      );
+    }
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Icon(Icons.description_rounded, size: 18, color: Colors.blueAccent),
     );
   }
 
@@ -437,9 +768,40 @@ class _AiAssistantTabState extends ConsumerState<AiAssistantTab> {
             color: colors.primary,
             borderRadius: BorderRadius.circular(12).copyWith(bottomRight: Radius.zero),
           ),
-          child: Text(
-            msg.text,
-            style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (msg.attachedFilePath != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isImageFile(msg.attachedFilePath!) ? Icons.image_rounded : Icons.description_rounded,
+                        size: 13,
+                        color: Colors.white70,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        msg.attachedFileName ?? 'Attached File',
+                        style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              Text(
+                msg.text,
+                style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.4),
+              ),
+            ],
           ),
         ),
       );

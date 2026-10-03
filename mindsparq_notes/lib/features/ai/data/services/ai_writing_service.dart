@@ -5,7 +5,9 @@ import '../../../../app/providers/settings_provider.dart';
 
 final aiWritingServiceProvider = Provider<AiWritingService>((ref) {
   final settings = ref.watch(settingsProvider);
-  return AiWritingService(apiKey: settings.geminiApiKey);
+  final envKey = Platform.environment['GEMINI_API_KEY'] ?? '';
+  final activeKey = settings.geminiApiKey.trim().isNotEmpty ? settings.geminiApiKey.trim() : envKey.trim();
+  return AiWritingService(apiKey: activeKey);
 });
 
 class ApiKeyValidationResult {
@@ -165,9 +167,11 @@ class AiWritingService {
     String? targetTone,
     String? targetLanguage,
     String? customInstruction,
+    String? attachedFilePath,
+    String? attachedFileName,
   }) async {
-    if (text.trim().isEmpty && (documentContext == null || documentContext.trim().isEmpty)) {
-      return 'Please select or provide some text to process.';
+    if (text.trim().isEmpty && (documentContext == null || documentContext.trim().isEmpty) && attachedFilePath == null) {
+      return 'Please enter a prompt or attach a file to process.';
     }
 
     if (hasApiKey) {
@@ -179,10 +183,14 @@ class AiWritingService {
           targetTone: targetTone,
           targetLanguage: targetLanguage,
           customInstruction: customInstruction,
+          attachedFilePath: attachedFilePath,
+          attachedFileName: attachedFileName,
         );
         if (result.trim().isNotEmpty) return result.trim();
-      } catch (_) {
-        // Fallback to local heuristic engine if API call fails or times out
+      } catch (e) {
+        final errText = e.toString().replaceAll('Exception: ', '');
+        return '⚠️ **Gemini Live Error:** $errText\n\n'
+            'Please verify your Gemini API key in Settings, check your quota, or verify your internet connection.';
       }
     }
 
@@ -194,6 +202,8 @@ class AiWritingService {
       targetTone: targetTone,
       targetLanguage: targetLanguage,
       customInstruction: customInstruction,
+      attachedFilePath: attachedFilePath,
+      attachedFileName: attachedFileName,
     );
   }
 
@@ -205,6 +215,8 @@ class AiWritingService {
     String? targetTone,
     String? targetLanguage,
     String? customInstruction,
+    String? attachedFilePath,
+    String? attachedFileName,
   }) async {
     final systemPrompt = _buildSystemPrompt(
       task: task,
@@ -222,12 +234,57 @@ class AiWritingService {
           : documentContext.trim());
       fullPrompt.writeln('--- END CONTEXT ---\n');
     }
+
+    // Handle text attachments by injecting into prompt context
+    if (attachedFilePath != null && File(attachedFilePath).existsSync()) {
+      final ext = attachedFilePath.split('.').last.toLowerCase();
+      final isBinaryMedia = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf'].contains(ext);
+      if (!isBinaryMedia) {
+        try {
+          final fileStr = await File(attachedFilePath).readAsString();
+          fullPrompt.writeln('\n--- ATTACHED FILE: ${attachedFileName ?? attachedFilePath.split(Platform.pathSeparator).last} ---');
+          fullPrompt.writeln(fileStr.length > 25000 ? '${fileStr.substring(0, 25000)}\n[Content truncated for length]' : fileStr);
+          fullPrompt.writeln('--- END ATTACHED FILE ---\n');
+        } catch (_) {}
+      }
+    }
+
     fullPrompt.writeln('TARGET TEXT / REQUEST:');
-    fullPrompt.writeln(text.trim());
+    fullPrompt.writeln(text.trim().isEmpty ? 'Please analyze the attached content and provide comprehensive notes/insights.' : text.trim());
+
+    // Prepare parts array
+    final parts = <Map<String, dynamic>>[];
+
+    // If attached image or PDF, pass as inlineData
+    if (attachedFilePath != null && File(attachedFilePath).existsSync()) {
+      final ext = attachedFilePath.split('.').last.toLowerCase();
+      String? mimeType;
+      if (ext == 'png') mimeType = 'image/png';
+      if (ext == 'jpg' || ext == 'jpeg') mimeType = 'image/jpeg';
+      if (ext == 'webp') mimeType = 'image/webp';
+      if (ext == 'gif') mimeType = 'image/gif';
+      if (ext == 'bmp') mimeType = 'image/bmp';
+      if (ext == 'pdf') mimeType = 'application/pdf';
+
+      if (mimeType != null) {
+        try {
+          final fileBytes = await File(attachedFilePath).readAsBytes();
+          parts.add({
+            'inlineData': {
+              'mimeType': mimeType,
+              'data': base64Encode(fileBytes),
+            }
+          });
+        } catch (_) {}
+      }
+    }
+
+    // Add main text prompt part
+    parts.add({'text': fullPrompt.toString()});
 
     final cleanKey = sanitizeApiKey(apiKey);
     final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 20);
+    client.connectionTimeout = const Duration(seconds: 25);
 
     final modelsToTry = [primaryModel, fallbackModel];
 
@@ -243,9 +300,7 @@ class AiWritingService {
           final body = jsonEncode({
             'contents': [
               {
-                'parts': [
-                  {'text': fullPrompt.toString()}
-                ]
+                'parts': parts,
               }
             ],
             'generationConfig': {
@@ -266,9 +321,9 @@ class AiWritingService {
             final candidates = json['candidates'] as List<dynamic>?;
             if (candidates != null && candidates.isNotEmpty) {
               final content = candidates[0]['content'] as Map<String, dynamic>?;
-              final parts = content?['parts'] as List<dynamic>?;
-              if (parts != null && parts.isNotEmpty) {
-                return (parts[0]['text'] as String? ?? '').trim();
+              final partsList = content?['parts'] as List<dynamic>?;
+              if (partsList != null && partsList.isNotEmpty) {
+                return (partsList[0]['text'] as String? ?? '').trim();
               }
             }
           }
@@ -279,7 +334,16 @@ class AiWritingService {
           }
 
           final responseBody = await response.transform(utf8.decoder).join();
-          throw Exception('Gemini API returned status ${response.statusCode}: $responseBody');
+          try {
+            final errJson = jsonDecode(responseBody) as Map<String, dynamic>;
+            final errObj = errJson['error'] as Map<String, dynamic>?;
+            if (errObj != null && errObj['message'] != null) {
+              throw Exception(errObj['message']);
+            }
+          } catch (pe) {
+            if (pe is Exception && !pe.toString().contains('FormatException')) rethrow;
+          }
+          throw Exception('Gemini API HTTP ${response.statusCode}: $responseBody');
         } catch (e) {
           if (model == modelsToTry.last) rethrow;
         }
@@ -330,6 +394,8 @@ class AiWritingService {
     String? targetTone,
     String? targetLanguage,
     String? customInstruction,
+    String? attachedFilePath,
+    String? attachedFileName,
   }) {
     final clean = text.trim().isEmpty ? (documentContext ?? '').trim() : text.trim();
 
@@ -362,7 +428,12 @@ class AiWritingService {
         return _localGenerateFlashcards(clean);
 
       case 'chat':
-        return _localDocumentChat(clean, documentContext ?? '');
+        return _localDocumentChat(
+          clean,
+          documentContext ?? '',
+          attachedFileName: attachedFileName,
+          attachedFilePath: attachedFilePath,
+        );
 
       default:
         return clean;
@@ -517,8 +588,28 @@ class AiWritingService {
     return buffer.toString().trim();
   }
 
-  String _localDocumentChat(String prompt, String context) {
+  String _localDocumentChat(
+    String prompt,
+    String context, {
+    String? attachedFileName,
+    String? attachedFilePath,
+  }) {
     final lower = prompt.toLowerCase();
+
+    if (attachedFileName != null) {
+      if (attachedFilePath != null && File(attachedFilePath).existsSync()) {
+        try {
+          final content = File(attachedFilePath).readAsStringSync();
+          return '📎 **Attached File Analysis:** `$attachedFileName`\n\n'
+              '${_localSummarize(content)}\n\n'
+              '💡 *Note: Connect your free Google Gemini API Key at the top of this panel for real-time multimodal deep analysis of images, PDFs, and data.*';
+        } catch (_) {}
+      }
+      return '📎 **Attached File:** `$attachedFileName`\n\n'
+          'To run real-time AI synthesis on attached images or documents with Gemini 2.0 Flash, please connect your Gemini API Key using the "Connect Key" button above.\n\n'
+          'Your prompt: "$prompt"';
+    }
+
     if (lower.contains('summar')) {
       return _localSummarize(context.isEmpty ? prompt : context);
     }
@@ -532,6 +623,8 @@ class AiWritingService {
       return _localExplain(context.isEmpty ? prompt : context);
     }
 
-    return 'Based on your note: "${prompt.trim()}" is an integral aspect of this workspace. You can refine this section, extract action items, or format it directly into your document using the quick actions below.';
+    return '💡 **Offline Mode:** Local engine ready.\n\n'
+        'You asked: "$prompt"\n\n'
+        'To get live, intelligent responses from Google Gemini 2.0 Flash (with web search, deep reasoning, and file analysis), please connect your Google Gemini API Key using the **"Connect Key"** button at the top of this panel or in Settings.';
   }
 }

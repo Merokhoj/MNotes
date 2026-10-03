@@ -6,6 +6,8 @@ class AiMessage {
   final String? actionType;
   final String? proposedReplacement;
   final bool isLoading;
+  final String? attachedFilePath;
+  final String? attachedFileName;
 
   const AiMessage({
     required this.id,
@@ -15,6 +17,8 @@ class AiMessage {
     this.actionType,
     this.proposedReplacement,
     this.isLoading = false,
+    this.attachedFilePath,
+    this.attachedFileName,
   });
 
   AiMessage copyWith({
@@ -25,6 +29,8 @@ class AiMessage {
     String? actionType,
     String? proposedReplacement,
     bool? isLoading,
+    String? attachedFilePath,
+    String? attachedFileName,
   }) {
     return AiMessage(
       id: id ?? this.id,
@@ -34,6 +40,8 @@ class AiMessage {
       actionType: actionType ?? this.actionType,
       proposedReplacement: proposedReplacement ?? this.proposedReplacement,
       isLoading: isLoading ?? this.isLoading,
+      attachedFilePath: attachedFilePath ?? this.attachedFilePath,
+      attachedFileName: attachedFileName ?? this.attachedFileName,
     );
   }
 }
