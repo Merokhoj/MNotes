@@ -144,6 +144,49 @@ flutter analyze                       → 1 pre-existing info (generated file), 
 
 ---
 
+### MSN-BUG-002 — Hardcoded EditorStyle padding injecting 56px gap between every paragraph block on Enter
+
+**Status:** CLOSED
+**Priority:** P1
+**Platform:** Windows Desktop / Android / Web
+**Feature / Module:** Note Editor / Block Component Rendering
+**Reported:** 2026-10-03
+**Closed:** 2026-10-03
+
+#### Problem Description
+Even when `paragraphSpacing` is set to 0.0 pt or 1.0 pt, pressing Enter creates an excessively large vertical gap (measured ~78 px in user screenshots). The paragraph spacing stepper or setting had almost no visible effect on closing the gap.
+
+#### Root Cause
+1. **Per-Block Padding Inflation**: In `note_editor_screen.dart`, `AppFlowyEditor` had:
+   ```dart
+   editorStyle: EditorStyle.desktop(
+     padding: const EdgeInsets.only(top: 8, bottom: 48),
+   )
+   ```
+   In AppFlowy Editor's `page_block_component.dart`, `editorState.editorStyle.padding` is **not** applied to the viewport — it is wrapped around **each and every individual block item** in the document:
+   ```dart
+   ...items.map(
+     (e) => Padding(
+       padding: editorState.editorStyle.padding,
+       child: editorState.renderer.build(context, e),
+     ),
+   )
+   ```
+   As a result, between *every consecutive paragraph*, the editor injected `bottom: 48 + top: 8 = 56 pixels` of unremovable whitespace, completely dwarfing the 1.0 pt setting.
+2. **Missing Renderer Rebind**: AppFlowyEditor caches its renderer and does not refresh builders on standard widget rebuilds unless explicitly reassigned or remounted.
+
+#### Fix Implemented
+1. Set `editorStyle: EditorStyle.desktop(padding: EdgeInsets.zero)`.
+2. Passed `footer: const SizedBox(height: 48)` to `AppFlowyEditor` so comfortable scroll clearance at the bottom of the note is preserved without adding space between blocks.
+3. Explicitly reassigned `editorData.editorState.renderer = BlockComponentRenderer(builders: customBuilders);` and keyed `AppFlowyEditor` dynamically to guarantee instant visual updates whenever font or spacing settings change.
+4. Added regression test `rendered paragraph gap matches configured spacing with zero editorStyle padding (regression: MSN-BUG-002)` in `test/spacing_test.dart` verifying exact pixel measurements.
+
+#### Verification
+- `flutter test test/spacing_test.dart` -> 5/5 PASS (gap at 0.0 pt is 0.0 px, gap at 1.0 pt is 1.0 px).
+- `flutter test` -> 26/26 PASS.
+
+---
+
 ## Infrastructure Issues (non-bug, tracked separately)
 
 ### INFRA-001 — No Git commits (no baseline for diff)

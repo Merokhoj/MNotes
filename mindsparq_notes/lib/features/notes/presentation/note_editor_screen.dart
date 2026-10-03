@@ -859,6 +859,11 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                                 ),
                                               );
 
+                                              editorData.editorState.renderer =
+                                                  BlockComponentRenderer(
+                                                builders: customBuilders,
+                                              );
+
                                               return Listener(
                                                 onPointerDown: (event) {
                                                   if (event.kind == PointerDeviceKind.mouse &&
@@ -885,14 +890,16 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                                   }
                                                 },
                                                 child: AppFlowyEditor(
+                                                  key: ValueKey(
+                                                    'editor_${widget.noteId}_${settings.paragraphSpacing}_${settings.lineHeight}_${settings.editorFont}_$currentFontSize',
+                                                  ),
                                                   editorState:
                                                       editorData.editorState,
                                                   contextMenuItems: const [],
+                                                  footer: const SizedBox(height: 48),
                                                   editorStyle:
                                                       EditorStyle.desktop(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                            top: 8, bottom: 48),
+                                                    padding: EdgeInsets.zero,
                                                     cursorColor: colors.primary,
                                                     selectionColor: colors.primary
                                                         .withOpacity(0.22),

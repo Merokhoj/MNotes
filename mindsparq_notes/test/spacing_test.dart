@@ -129,4 +129,68 @@ void main() {
     final outOfBounds = double.tryParse('35')?.clamp(0.0, 24.0);
     expect(outOfBounds, equals(24.0));
   });
+
+  testWidgets('rendered paragraph gap matches configured spacing with zero editorStyle padding (regression: MSN-BUG-002)', (tester) async {
+    // Root cause of MSN-BUG-002:
+    //   EditorStyle.desktop(padding: EdgeInsets.only(top: 8, bottom: 48)) applied
+    //   top: 8 and bottom: 48 to EVERY individual block item in AppFlowyEditor,
+    //   injecting an inescapable 56px gap between consecutive paragraphs.
+    //
+    // Fix:
+    //   EditorStyle.desktop(padding: EdgeInsets.zero) so block padding is solely
+    //   controlled by paragraphSpacing, and bottom clearance is handled by footer.
+    final customBuilders = Map<String, BlockComponentBuilder>.from(standardBlockComponentBuilderMap);
+    customBuilders[ParagraphBlockKeys.type] = ParagraphBlockComponentBuilder(
+      configuration: BlockComponentConfiguration(
+        padding: (node) => const EdgeInsets.symmetric(
+          vertical: testParagraphSpacing / 2,
+        ),
+      ),
+    );
+
+    final editorState = EditorState(
+      document: Document(
+        root: pageNode(
+          children: [
+            paragraphNode(text: 'Line 1'),
+            paragraphNode(text: 'Line 2'),
+          ],
+        ),
+      ),
+    );
+    editorState.renderer = BlockComponentRenderer(builders: customBuilders);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppFlowyEditor(
+            editorState: editorState,
+            blockComponentBuilders: customBuilders,
+            footer: const SizedBox(height: 48),
+            editorStyle: const EditorStyle.desktop(
+              padding: EdgeInsets.zero,
+              textStyleConfiguration: TextStyleConfiguration(
+                text: TextStyle(fontSize: 16.0, height: 1.0),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final rps = tester.renderObjectList(find.byType(RichText)).toList();
+    expect(rps.length, equals(2));
+
+    final p0 = rps[0] as RenderBox;
+    final p1 = rps[1] as RenderBox;
+    final p0Bottom = p0.localToGlobal(Offset.zero).dy + p0.size.height;
+    final p1Top = p1.localToGlobal(Offset.zero).dy;
+    final gap = p1Top - p0Bottom;
+
+    expect(gap, equals(testParagraphSpacing),
+        reason: 'Visual gap must match exactly 1.0 pt, free from 56px per-block inflation');
+  });
 }
+
