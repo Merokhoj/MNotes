@@ -26,7 +26,7 @@ class AppSettings {
     this.sidebarWidth = 240.0,
     this.notesListWidth = 300.0,
     this.lineHeight = 1.0,
-    this.paragraphSpacing = 2.0,
+    this.paragraphSpacing = 4.0,
   });
 
   AppSettings copyWith({
@@ -78,13 +78,13 @@ class SettingsNotifier extends Notifier<AppSettings> {
     double paragraphSpacing;
     if (storedVersion < _currentSettingsVersion) {
       lineHeight = 1.0;
-      paragraphSpacing = 2.0;
+      paragraphSpacing = 4.0; // Must match minimum dropdown option in settings_dialog.dart
       prefs.setInt(_settingsVersionKey, _currentSettingsVersion);
       prefs.setDouble(_lineHeightKey, lineHeight);
       prefs.setDouble(_paragraphSpacingKey, paragraphSpacing);
     } else {
       lineHeight = (prefs.getDouble(_lineHeightKey) ?? 1.0).clamp(0.8, 2.0);
-      paragraphSpacing = (prefs.getDouble(_paragraphSpacingKey) ?? 2.0).clamp(0.0, 12.0);
+      paragraphSpacing = (prefs.getDouble(_paragraphSpacingKey) ?? 4.0).clamp(0.0, 12.0);
     }
 
     return AppSettings(

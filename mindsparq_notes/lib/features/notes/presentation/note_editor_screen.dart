@@ -830,7 +830,12 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
                                               final customBuilders = Map<String, BlockComponentBuilder>.from(standardBlockComponentBuilderMap);
                                               customBuilders[ParagraphBlockKeys.type] = ParagraphBlockComponentBuilder(
                                                 configuration: BlockComponentConfiguration(
-                                                  padding: (node) => EdgeInsets.only(bottom: settings.paragraphSpacing),
+                                                  // Split spacing symmetrically: half above + half below each block.
+                                                  // Using only(bottom:) stacks the full gap between consecutive paragraphs,
+                                                  // making Enter appear to create a double-sized gap.
+                                                  padding: (node) => EdgeInsets.symmetric(
+                                                    vertical: settings.paragraphSpacing / 2,
+                                                  ),
                                                 ),
                                               );
                                               customBuilders[TodoListBlockKeys.type] = TodoListBlockComponentBuilder(

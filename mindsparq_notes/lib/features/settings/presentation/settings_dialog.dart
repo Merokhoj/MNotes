@@ -332,8 +332,9 @@ class _SettingsDialogState extends ConsumerState<SettingsDialog> {
                                 style: TextStyle(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
                                 items: const [
                                   DropdownMenuItem(value: 0.0, child: Text('0 pt (None)')),
-                                  DropdownMenuItem(value: 4.0, child: Text('4 pt')),
-                                  DropdownMenuItem(value: 6.0, child: Text('6 pt (Professional)')),
+                                  DropdownMenuItem(value: 2.0, child: Text('2 pt (Tight)')),
+                                  DropdownMenuItem(value: 4.0, child: Text('4 pt (Default)')),
+                                  DropdownMenuItem(value: 6.0, child: Text('6 pt (Relaxed)')),
                                   DropdownMenuItem(value: 8.0, child: Text('8 pt')),
                                   DropdownMenuItem(value: 12.0, child: Text('12 pt')),
                                 ],
