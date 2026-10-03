@@ -1,0 +1,13 @@
+{
+    "dart.analyzerAdditionalArgs": [],
+    "dart.onlyAnalyzeProjectsWithOpenFiles": true,
+    "dart.analysisExcludedFolders": [
+        "build",
+        ".dart_tool",
+        "android",
+        "ios",
+        "windows",
+        "linux",
+        "macos"
+    ]
+}

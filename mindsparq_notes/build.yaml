@@ -1,0 +1,11 @@
+targets:
+  $default:
+    builders:
+      drift_dev:
+        generate_for:
+          - lib/data/local/database/**.dart
+        options:
+          generate_connect_constructor: true
+      freezed:
+        generate_for:
+          - lib/domain/models/**.dart
