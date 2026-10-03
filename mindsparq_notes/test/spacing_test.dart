@@ -16,7 +16,7 @@ void main() {
     //   total inter-paragraph gap = P1.bottom + P2.top = spacing/2 + spacing/2
     //   = exactly one spacing unit — as intended.
 
-    final paragraphPadding = EdgeInsets.symmetric(
+    const paragraphPadding = EdgeInsets.symmetric(
       vertical: testParagraphSpacing / 2,
     );
 
@@ -48,7 +48,7 @@ void main() {
 
     customBuilders[ParagraphBlockKeys.type] = ParagraphBlockComponentBuilder(
       configuration: BlockComponentConfiguration(
-        padding: (node) => EdgeInsets.symmetric(
+        padding: (node) => const EdgeInsets.symmetric(
           vertical: testParagraphSpacing / 2,
         ),
       ),

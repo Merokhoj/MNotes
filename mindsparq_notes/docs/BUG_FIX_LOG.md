@@ -69,7 +69,80 @@ Never delete an entry. Move resolved entries to **Closed Bugs**.
 
 ## Active Bugs
 
-_No active bugs recorded yet. Add entries here as bugs are confirmed._
+### MSN-BUG-001 — Excessive vertical gap between paragraphs on Enter
+
+**Status:** FIX IMPLEMENTED — VERIFICATION INCOMPLETE (automated tests pass; runtime manual verification pending)
+**Priority:** P2
+**Platform:** Android (confirmed), Windows/Linux (likely same)
+**Feature / Module:** Note Editor / Paragraph Spacing
+**Reported:** 2026-10-03
+**Closed:** —
+
+#### Problem Description
+Pressing Enter in the Rich Text Editor creates an abnormally large vertical gap between paragraphs. Adding multiple paragraphs makes the document grow disproportionately.
+
+#### Steps to Reproduce
+1. Open MindSparQ Notes.
+2. Open or create a note.
+3. Type any text, press Enter, type more text.
+4. Observe: gap between the two lines is roughly 2× what it should be.
+
+#### Expected Behavior
+A single, balanced gap between consecutive paragraphs equal to the configured Paragraph Spacing value.
+
+#### Actual Behavior
+The gap appeared to be approximately 2× the intended spacing because `EdgeInsets.only(bottom: spacing)` on each paragraph stacked `spacing + spacing` between consecutive blocks.
+
+A second issue caused the Settings dialog to show no selected value for Paragraph Spacing: the stored default (`2.0`) was not present as a dropdown option (minimum option was `4.0`), causing `null` selection.
+
+#### Root Cause
+Two independent issues, both confirmed from source:
+
+1. **Double-gap stacking** (`note_editor_screen.dart:833`):
+   - `EdgeInsets.only(bottom: settings.paragraphSpacing)` applied to every paragraph block
+   - Between two consecutive paragraphs: P1.bottom + P2.bottom = 2 × spacing
+   - Fix: `EdgeInsets.symmetric(vertical: spacing / 2)` → P1.bottom + P2.top = spacing
+
+2. **Default/dropdown mismatch** (`settings_provider.dart:29,81,87` + `settings_dialog.dart:333-339`):
+   - Default `paragraphSpacing = 2.0` but dropdown minimum was `4.0`
+   - No `2.0` option → dropdown showed null → user could not see or adjust current value
+   - Fix: Default changed to `4.0`; `2.0 pt (Tight)` option added to dropdown
+
+#### Files Changed
+| File | Change |
+|---|---|
+| `lib/app/providers/settings_provider.dart` | Default `paragraphSpacing` 2.0 → 4.0; migration reset value 2.0 → 4.0; fallback 2.0 → 4.0 |
+| `lib/features/settings/presentation/settings_dialog.dart` | Added `2 pt (Tight)` option; renamed `4 pt` → `4 pt (Default)`; `6 pt (Professional)` → `6 pt (Relaxed)` |
+| `lib/features/notes/presentation/note_editor_screen.dart` | `EdgeInsets.only(bottom: spacing)` → `EdgeInsets.symmetric(vertical: spacing / 2)` |
+| `test/spacing_test.dart` | Added 2 regression tests for MSN-BUG-001; updated builder test to use new symmetric padding |
+
+#### Acceptance Criteria
+
+| # | Criterion | Method | Result |
+|---|---|---|---|
+| 1 | Symmetric padding contract: top == bottom == spacing/2 | `flutter test test/spacing_test.dart` | **PASS** |
+| 2 | Total inter-paragraph gap == exactly 1× spacing | `flutter test test/spacing_test.dart` | **PASS** |
+| 3 | Default value (4.0) matches a valid dropdown option | `flutter test test/spacing_test.dart` | **PASS** |
+| 4 | `flutter analyze` — no new errors in edited files | `flutter analyze` | **PASS** (1 pre-existing info in generated file) |
+| 5 | Enter creates compact gap in running Android app | Manual — device required | **NOT TESTED** |
+| 6 | Paragraph spacing dropdown shows selected value | Manual — settings dialog | **NOT TESTED** |
+| 7 | Existing notes reopen with correct spacing | Manual — close/reopen note | **NOT TESTED** |
+| 8 | Bold, italic, heading, lists unaffected | Manual | **NOT TESTED** |
+
+#### Verification Commands Run
+```
+flutter test test/spacing_test.dart   → 3/3 PASS
+flutter analyze                       → 1 pre-existing info (generated file), 0 new errors
+```
+
+#### Final Status
+**FIX IMPLEMENTED — VERIFICATION INCOMPLETE**
+
+Automated tests pass. Runtime manual verification on Android required to confirm the visual gap is resolved.
+
+#### Notes / Remaining Risks
+- `paragraphSpacing` setting version migration will reset existing users' custom spacing to `4.0` on next app launch if they were on version < 2. This is by design (version bump forces reset) but may surprise users who manually set it to e.g. `6.0`.
+- `_currentSettingsVersion` is still `2` — if a future change needs another reset, bump it to `3`.
 
 ---
 
