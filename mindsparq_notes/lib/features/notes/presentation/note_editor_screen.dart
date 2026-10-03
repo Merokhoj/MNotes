@@ -1408,7 +1408,16 @@ class _EditorToolbarState extends ConsumerState<_EditorToolbar> {
 
                             _VerticalDivider(color: colors.border),
 
-                            // ── 4. Blocks & Lists ──
+                            // ── 4. Line & Paragraph Spacing ──
+                            _ParagraphSpacingToolbarItem(
+                              currentSpacing: settings.paragraphSpacing,
+                              onSpacingChanged: (val) =>
+                                  settingsNotifier.updateParagraphSpacing(val),
+                            ),
+
+                            _VerticalDivider(color: colors.border),
+
+                            // ── 5. Blocks & Lists ──
                             _ToolbarItem(
                               icon: PhosphorIcons.textHOne(
                                   PhosphorIconsStyle.bold),
@@ -1878,6 +1887,437 @@ class _VerticalDivider extends StatelessWidget {
       height: 16,
       margin: const EdgeInsets.symmetric(horizontal: 6),
       color: color.withOpacity(0.3),
+    );
+  }
+}
+
+/// Compact neo-glass toolbar widget for line/paragraph spacing with stepper & modal launcher
+class _ParagraphSpacingToolbarItem extends StatelessWidget {
+  final double currentSpacing;
+  final ValueChanged<double> onSpacingChanged;
+
+  const _ParagraphSpacingToolbarItem({
+    required this.currentSpacing,
+    required this.onSpacingChanged,
+  });
+
+  void _openSpacingDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _ParagraphSpacingDialog(
+        initialSpacing: currentSpacing,
+        onApply: onSpacingChanged,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+
+    return Container(
+      height: 28,
+      decoration: BoxDecoration(
+        color: colors.surface2.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        border: Border.all(color: colors.border.withOpacity(0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Icon with tooltip
+          Tooltip(
+            message: 'Paragraph Spacing (Click for options)',
+            child: InkWell(
+              onTap: () => _openSpacingDialog(context),
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(AppSpacing.radiusSm),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                child: Icon(
+                  Icons.format_line_spacing_rounded,
+                  size: 14,
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+          ),
+
+          // Stepper: Decrement (-)
+          Tooltip(
+            message: 'Decrease Spacing (-1 pt)',
+            child: InkWell(
+              onTap: currentSpacing > 0.0
+                  ? () => onSpacingChanged((currentSpacing - 1.0).clamp(0.0, 24.0))
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Icon(
+                  Icons.remove_rounded,
+                  size: 13,
+                  color: currentSpacing > 0.0
+                      ? colors.textSecondary
+                      : colors.textTertiary.withOpacity(0.35),
+                ),
+              ),
+            ),
+          ),
+
+          // Current Spacing Label (Clickable to open dialog/manual entry)
+          Tooltip(
+            message: 'Current spacing: ${currentSpacing % 1 == 0 ? currentSpacing.toInt() : currentSpacing.toStringAsFixed(1)} pt (Click to change)',
+            child: InkWell(
+              onTap: () => _openSpacingDialog(context),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3),
+                child: Text(
+                  '${currentSpacing % 1 == 0 ? currentSpacing.toInt() : currentSpacing.toStringAsFixed(1)} pt',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Stepper: Increment (+)
+          Tooltip(
+            message: 'Increase Spacing (+1 pt)',
+            child: InkWell(
+              onTap: currentSpacing < 24.0
+                  ? () => onSpacingChanged((currentSpacing + 1.0).clamp(0.0, 24.0))
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Icon(
+                  Icons.add_rounded,
+                  size: 13,
+                  color: currentSpacing < 24.0
+                      ? colors.textSecondary
+                      : colors.textTertiary.withOpacity(0.35),
+                ),
+              ),
+            ),
+          ),
+
+          // Dropdown Arrow (Click for presets & manual input)
+          Tooltip(
+            message: 'Spacing Presets & Manual Input',
+            child: InkWell(
+              onTap: () => _openSpacingDialog(context),
+              borderRadius: const BorderRadius.horizontal(
+                right: Radius.circular(AppSpacing.radiusSm),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 1, right: 4, top: 4, bottom: 4),
+                child: Icon(
+                  Icons.arrow_drop_down_rounded,
+                  size: 16,
+                  color: colors.textSecondary,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Dialog for quick presets and manual numerical input for paragraph spacing
+class _ParagraphSpacingDialog extends StatefulWidget {
+  final double initialSpacing;
+  final ValueChanged<double> onApply;
+
+  const _ParagraphSpacingDialog({
+    required this.initialSpacing,
+    required this.onApply,
+  });
+
+  @override
+  State<_ParagraphSpacingDialog> createState() => _ParagraphSpacingDialogState();
+}
+
+class _ParagraphSpacingDialogState extends State<_ParagraphSpacingDialog> {
+  late final TextEditingController _controller;
+  late double _selectedSpacing;
+
+  static const List<double> _presetOptions = [
+    0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSpacing = widget.initialSpacing;
+    _controller = TextEditingController(
+      text: _formatValue(widget.initialSpacing),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _formatValue(double val) {
+    return val % 1 == 0 ? val.toInt().toString() : val.toStringAsFixed(1);
+  }
+
+  void _applyAndClose(double val) {
+    final clamped = val.clamp(0.0, 24.0);
+    widget.onApply(clamped);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  void _submitFromText() {
+    final val = double.tryParse(_controller.text.trim());
+    if (val != null) {
+      _applyAndClose(val);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+
+    return Dialog(
+      backgroundColor: colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        side: BorderSide(color: colors.border.withOpacity(0.5)),
+      ),
+      child: Container(
+        width: 350,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  ),
+                  child: const Icon(
+                    Icons.format_line_spacing_rounded,
+                    color: AppColors.accent,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Paragraph Spacing',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                      ),
+                      Text(
+                        'Vertical space between blocks (Default: 1 pt)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close_rounded, size: 18, color: colors.textSecondary),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  splashRadius: 16,
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // Quick Presets
+            Text(
+              'Quick Presets',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _presetOptions.map((val) {
+                final isSelected = (_selectedSpacing == val);
+                String label;
+                if (val == 0.0) {
+                  label = '0 pt (None)';
+                } else if (val == 1.0) {
+                  label = '1 pt (Default)';
+                } else if (val == 2.0) {
+                  label = '2 pt (Tight)';
+                } else if (val == 4.0) {
+                  label = '4 pt';
+                } else if (val == 6.0) {
+                  label = '6 pt (Relaxed)';
+                } else {
+                  label = '${val.toInt()} pt';
+                }
+
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedSpacing = val;
+                      _controller.text = _formatValue(val);
+                    });
+                    _applyAndClose(val);
+                  },
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.accent.withOpacity(0.18)
+                          : colors.surface2.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.accent
+                            : colors.border.withOpacity(0.4),
+                        width: isSelected ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? AppColors.accent : colors.textPrimary,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            // Manual Input Section
+            Text(
+              'Manual Input (Custom pt)',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                // Quick Decrement
+                IconButton(
+                  onPressed: () {
+                    final curr = double.tryParse(_controller.text.trim()) ?? _selectedSpacing;
+                    final next = (curr - 1.0).clamp(0.0, 24.0);
+                    setState(() {
+                      _selectedSpacing = next;
+                      _controller.text = _formatValue(next);
+                    });
+                  },
+                  icon: const Icon(Icons.remove_rounded, size: 16),
+                  splashRadius: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: colors.textSecondary,
+                ),
+                // Text Field
+                Expanded(
+                  child: Container(
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: colors.surface2.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      border: Border.all(color: colors.border.withOpacity(0.5)),
+                    ),
+                    child: TextField(
+                      controller: _controller,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                      ],
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: colors.textPrimary,
+                      ),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                        border: InputBorder.none,
+                        suffixText: 'pt',
+                        suffixStyle: TextStyle(
+                          fontSize: 11,
+                          color: colors.textTertiary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      onSubmitted: (_) => _submitFromText(),
+                    ),
+                  ),
+                ),
+                // Quick Increment
+                IconButton(
+                  onPressed: () {
+                    final curr = double.tryParse(_controller.text.trim()) ?? _selectedSpacing;
+                    final next = (curr + 1.0).clamp(0.0, 24.0);
+                    setState(() {
+                      _selectedSpacing = next;
+                      _controller.text = _formatValue(next);
+                    });
+                  },
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  splashRadius: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: colors.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                // Apply Button
+                ElevatedButton(
+                  onPressed: _submitFromText,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                    minimumSize: const Size(0, 36),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                    ),
+                  ),
+                  child: const Text(
+                    'Apply',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

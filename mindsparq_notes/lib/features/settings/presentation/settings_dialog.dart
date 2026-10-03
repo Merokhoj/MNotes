@@ -330,14 +330,33 @@ class _SettingsDialogState extends ConsumerState<SettingsDialog> {
                                 underline: const SizedBox.shrink(),
                                 dropdownColor: colors.surface,
                                 style: TextStyle(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
-                                items: const [
-                                  DropdownMenuItem(value: 0.0, child: Text('0 pt (None)')),
-                                  DropdownMenuItem(value: 2.0, child: Text('2 pt (Tight)')),
-                                  DropdownMenuItem(value: 4.0, child: Text('4 pt (Default)')),
-                                  DropdownMenuItem(value: 6.0, child: Text('6 pt (Relaxed)')),
-                                  DropdownMenuItem(value: 8.0, child: Text('8 pt')),
-                                  DropdownMenuItem(value: 12.0, child: Text('12 pt')),
-                                ],
+                                items: () {
+                                  final standardValues = [0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
+                                  final values = List<double>.from(standardValues);
+                                  if (!values.contains(settings.paragraphSpacing)) {
+                                    values.add(settings.paragraphSpacing);
+                                    values.sort();
+                                  }
+                                  return values.map((val) {
+                                    String label;
+                                    if (val == 0.0) {
+                                      label = '0 pt (None)';
+                                    } else if (val == 1.0) {
+                                      label = '1 pt (Default)';
+                                    } else if (val == 2.0) {
+                                      label = '2 pt (Tight)';
+                                    } else if (val == 4.0) {
+                                      label = '4 pt';
+                                    } else if (val == 6.0) {
+                                      label = '6 pt (Relaxed)';
+                                    } else if (!standardValues.contains(val)) {
+                                      label = '${val % 1 == 0 ? val.toInt() : val.toStringAsFixed(1)} pt (Custom)';
+                                    } else {
+                                      label = '${val.toInt()} pt';
+                                    }
+                                    return DropdownMenuItem(value: val, child: Text(label));
+                                  }).toList();
+                                }(),
                                 onChanged: (val) {
                                   if (val != null) settingsNotifier.updateParagraphSpacing(val);
                                 },
